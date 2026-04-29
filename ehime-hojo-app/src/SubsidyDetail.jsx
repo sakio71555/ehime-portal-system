@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Helmet } from 'react-helmet-async';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
+import SEO from './components/SEO';
+import SubsidySEO from './components/SubsidySEO';
 import {
   isItemClosed,
   getPurposeTagList,
@@ -80,6 +81,18 @@ const getPeriodText = (subsidy) => {
   );
 };
 
+const toDisplayText = (value, fallback = '詳細は公式ページをご確認ください。') => {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join(' / ') || fallback;
+  }
+
+  if (value === null || value === undefined || String(value).trim() === '') {
+    return fallback;
+  }
+
+  return String(value);
+};
+
 export default function SubsidyDetail() {
   const { id: subsidyId } = useParams();
   const navigate = useNavigate();
@@ -143,6 +156,13 @@ export default function SubsidyDetail() {
           backgroundColor: '#f9fafb',
         }}
       >
+        <SEO
+          title="補助金情報を読み込み中"
+          description="愛媛県内の補助金・助成金情報を読み込んでいます。"
+          canonical={`/subsidy/${subsidyId || ''}`}
+          noindex
+        />
+
         <Header />
 
         <div
@@ -171,14 +191,12 @@ export default function SubsidyDetail() {
           backgroundColor: '#f9fafb',
         }}
       >
-        <Helmet>
-          <title>補助金情報が見つかりません | 愛媛の補助金ポータル</title>
-          <meta
-            name="description"
-            content="指定された補助金情報は見つかりませんでした。公開終了、または非公開になっている可能性があります。"
-          />
-          <meta name="robots" content="noindex,nofollow" />
-        </Helmet>
+        <SEO
+          title="補助金情報が見つかりません"
+          description="指定された補助金情報は見つかりませんでした。公開終了、または非公開になっている可能性があります。"
+          canonical={`/subsidy/${subsidyId || ''}`}
+          noindex
+        />
 
         <Header />
 
@@ -261,6 +279,8 @@ export default function SubsidyDetail() {
   const regionTags = getItemRegionCategories(subsidy);
   const tags = [...new Set([...purposeTags, ...regionTags])].filter(Boolean);
 
+  const canonical = `/subsidy/${subsidyId}`;
+
   return (
     <div
       style={{
@@ -272,27 +292,7 @@ export default function SubsidyDetail() {
           '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif',
       }}
     >
-      <Helmet>
-        <title>{subsidy.title} | 愛媛の補助金ポータル</title>
-        <meta
-          name="description"
-          content={
-            subsidy.summary ||
-            '愛媛県内の補助金・助成金の詳細情報です。対象者や申請期限を確認できます。'
-          }
-        />
-        <meta
-          property="og:title"
-          content={`${subsidy.title} | 愛媛の補助金ポータル`}
-        />
-        <meta
-          property="og:description"
-          content={
-            subsidy.summary ||
-            '愛媛県内の補助金・助成金の詳細情報です。'
-          }
-        />
-      </Helmet>
+      <SubsidySEO subsidy={subsidy} canonical={canonical} />
 
       <Header />
 
@@ -478,8 +478,9 @@ export default function SubsidyDetail() {
                       border: '1px solid #f1f5f9',
                     }}
                   >
-                    {subsidy.target_entities ||
-                      '詳細は公式ページをご確認ください。'}
+                    {toDisplayText(
+                      subsidy.target_entities || subsidy.target_entities_arr
+                    )}
                   </div>
                 </div>
 
@@ -508,8 +509,9 @@ export default function SubsidyDetail() {
                       border: '1px solid #f1f5f9',
                     }}
                   >
-                    {subsidy.target_expenses ||
-                      '詳細は公式ページをご確認ください。'}
+                    {toDisplayText(
+                      subsidy.target_expenses || subsidy.target_expenses_arr
+                    )}
                   </div>
                 </div>
 

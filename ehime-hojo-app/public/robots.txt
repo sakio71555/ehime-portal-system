@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /login
+Disallow: /dashboard
+
+Sitemap: https://ehime-hojokin.jp/sitemap.xml
