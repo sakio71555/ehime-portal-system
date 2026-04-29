@@ -1,0 +1,247 @@
+/* ベースリセットと変数 */
+:root {
+  --primary-color: #0056b3;
+  --accent-color: #e63946;
+  --bg-color: #f4f7f6;
+  --text-main: #333;
+  --text-muted: #666;
+  --border-color: #eaeaea;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-main);
+}
+
+/* ヒーローセクション（上部の検索エリア） */
+.hero-section {
+  background: linear-gradient(135deg, #0056b3 0%, #00a8cc 100%);
+  color: white;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.hero-content h1 {
+  margin: 0 0 10px 0;
+  font-size: 32px;
+  letter-spacing: 1px;
+}
+
+.hero-content p {
+  margin: 0 0 30px 0;
+  font-size: 16px;
+  opacity: 0.9;
+}
+
+.search-box {
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.search-box input {
+  flex: 1;
+  padding: 16px 20px;
+  border: none;
+  font-size: 16px;
+  outline: none;
+}
+
+.search-btn {
+  background-color: #ff9800;
+  color: white;
+  border: none;
+  padding: 0 30px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.search-btn:hover {
+  background-color: #f57c00;
+}
+
+/* メインコンテンツ・レイアウト */
+.main-content {
+  max-width: 1000px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+/* 絞り込みタブ */
+.filter-section {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.filter-section h3 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.region-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tab-btn {
+  padding: 8px 20px;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-muted);
+  border-radius: 30px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: #f0f0f0;
+}
+
+.tab-btn.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 検索結果件数 */
+.results-info {
+  margin-bottom: 15px;
+  color: var(--text-muted);
+}
+
+.results-info strong {
+  color: var(--text-main);
+  font-size: 18px;
+}
+
+/* カードグリッド */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+/* 補助金カード本体 */
+.subsidy-card {
+  background: white;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+  border-top: 4px solid var(--primary-color);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.subsidy-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 15px;
+}
+
+.region-badge {
+  background-color: #e8f4fd;
+  color: var(--primary-color);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 11px;
+  color: #888;
+}
+
+.card-title {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0 0 10px 0;
+  color: var(--text-main);
+}
+
+.target-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 20px 0;
+}
+
+.card-body {
+  background: #fafafa;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  flex-grow: 1;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.info-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.info-value {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.amount {
+  color: var(--accent-color);
+  font-size: 20px;
+}
+
+.detail-btn {
+  width: 100%;
+  padding: 14px;
+  background: white;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.detail-btn:hover {
+  background: var(--primary-color);
+  color: white;
+}

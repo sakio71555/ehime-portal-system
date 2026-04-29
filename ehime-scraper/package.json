@@ -1,0 +1,25 @@
+{
+  "name": "ehime-scraper",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "jgrants": "node import-jgrants.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
+    "axios": "^1.15.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "openai": "^6.34.0",
+    "pdf-img-convert": "^2.0.0",
+    "pdf-parse": "^2.4.5",
+    "pdf2json": "^4.0.2",
+    "puppeteer": "^24.40.0",
+    "rss-parser": "^3.13.0"
+  }
+}
