@@ -73,6 +73,65 @@ function getKeywordFromSearch(location) {
   return params.get('keyword') || params.get('q') || '';
 }
 
+function getNewArrivalTimestamp(item) {
+  const candidates = [
+    item?.fetched_at,
+    item?.updated_at,
+    item?.published_at,
+    item?.imported_at,
+    item?.crawled_at,
+    item?.created_at,
+  ];
+
+  for (const value of candidates) {
+    if (!value) continue;
+
+    const time = new Date(value).getTime();
+
+    if (!Number.isNaN(time)) {
+      return time;
+    }
+  }
+
+  return Number(item?.id || 0);
+}
+
+function getAmountValue(item) {
+  const rawValue =
+    item?.amount_max_yen ||
+    parseAmount(item?.amount_text || item?.amount || '');
+
+  const num = Number(rawValue || 0);
+
+  return Number.isFinite(num) ? num : 0;
+}
+
+function compareAmountDesc(a, b) {
+  const aVal = getAmountValue(a);
+  const bVal = getAmountValue(b);
+
+  const aMissing = aVal <= 0;
+  const bMissing = bVal <= 0;
+
+  if (aMissing && !bMissing) return 1;
+  if (!aMissing && bMissing) return -1;
+
+  return bVal - aVal;
+}
+
+function compareAmountAsc(a, b) {
+  const aVal = getAmountValue(a);
+  const bVal = getAmountValue(b);
+
+  const aMissing = aVal <= 0;
+  const bMissing = bVal <= 0;
+
+  if (aMissing && !bMissing) return 1;
+  if (!aMissing && bMissing) return -1;
+
+  return aVal - bVal;
+}
+
 export default function EhimeSubsidyPortal() {
   const location = useLocation();
 
@@ -81,7 +140,7 @@ export default function EhimeSubsidyPortal() {
   const [loading, setLoading] = useState(true);
 
   const [displayMode, setDisplayMode] = useState('open');
-  const [sortBy, setSortBy] = useState('deadline');
+  const [sortBy, setSortBy] = useState('newest');
   const [keyword, setKeyword] = useState('');
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [selectedPurposes, setSelectedPurposes] = useState([]);
@@ -254,20 +313,36 @@ export default function EhimeSubsidyPortal() {
       const aClosed = isItemClosed(a);
       const bClosed = isItemClosed(b);
 
-      if (displayMode === 'all' && aClosed !== bClosed) return aClosed ? 1 : -1;
-
-      if (sortBy === 'amount') {
-        const aVal = a.amount_max_yen || parseAmount(a.amount_text || a.amount);
-        const bVal = b.amount_max_yen || parseAmount(b.amount_text || b.amount);
-        return bVal - aVal;
+      if (displayMode === 'all' && aClosed !== bClosed) {
+        return aClosed ? 1 : -1;
       }
 
-      const dateA = getSortableDateTimestamp(a);
-      const dateB = getSortableDateTimestamp(b);
+      if (sortBy === 'newest') {
+        return getNewArrivalTimestamp(b) - getNewArrivalTimestamp(a);
+      }
 
-      if (displayMode === 'closed') return dateB - dateA;
+      if (sortBy === 'deadline') {
+        const dateA = getSortableDateTimestamp(a);
+        const dateB = getSortableDateTimestamp(b);
 
-      return dateA - dateB;
+        if (displayMode === 'closed') return dateB - dateA;
+
+        return dateA - dateB;
+      }
+
+      if (sortBy === 'amount_desc') {
+        return compareAmountDesc(a, b);
+      }
+
+      if (sortBy === 'amount_asc') {
+        return compareAmountAsc(a, b);
+      }
+
+      if (sortBy === 'title') {
+        return String(a.title || '').localeCompare(String(b.title || ''), 'ja');
+      }
+
+      return getNewArrivalTimestamp(b) - getNewArrivalTimestamp(a);
     });
 
     return items;
@@ -516,8 +591,11 @@ export default function EhimeSubsidyPortal() {
                           boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
                         }}
                       >
+                        <option value="newest">新着順</option>
                         <option value="deadline">締切が近い順</option>
-                        <option value="amount">上限金額が高い順</option>
+                        <option value="amount_desc">上限金額が高い順</option>
+                        <option value="amount_asc">上限金額が低い順</option>
+                        <option value="title">タイトル順</option>
                       </select>
                     </div>
                   </div>

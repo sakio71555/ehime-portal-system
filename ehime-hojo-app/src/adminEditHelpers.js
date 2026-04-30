@@ -20,21 +20,45 @@ export const warekiToWesternTextForStatus = (value = '') => {
   return text;
 };
 
+const normalizeIsoDate = (value) => {
+  const text = String(value || '').trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+
+  return null;
+};
+
+const toIsoFromDateMatch = (match) => {
+  if (!match) return null;
+
+  const year = match[1];
+  const month = String(Number(match[2])).padStart(2, '0');
+  const day = String(Number(match[3])).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
 export const parsePeriodDatesForStatus = (periodText = '') => {
-  const text = warekiToWesternTextForStatus(periodText);
+  const text = warekiToWesternTextForStatus(periodText)
+    .replace(/[〜~]/g, '～')
+    .replace(/[－―ー]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const openEnded =
     /(助成枠に達するまで|予算に達するまで|予算額に達するまで|予算枠に達し次第|予算上限に達し次第|定員に達し次第|達し次第|なくなり次第|随時|通年|常時)/.test(
       text
     );
 
-  const firstDate = text.match(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日?/);
+  const allDates = [
+    ...text.matchAll(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日?/g),
+  ];
 
-  const firstIso = firstDate
-    ? `${firstDate[1]}-${String(Number(firstDate[2])).padStart(2, '0')}-${String(
-        Number(firstDate[3])
-      ).padStart(2, '0')}`
-    : null;
+  const firstIso = allDates.length > 0 ? toIsoFromDateMatch(allDates[0]) : null;
+  const lastIso =
+    allDates.length > 0 ? toIsoFromDateMatch(allDates[allDates.length - 1]) : null;
 
   if (openEnded) {
     return {
@@ -44,8 +68,23 @@ export const parsePeriodDatesForStatus = (periodText = '') => {
     };
   }
 
+  /**
+   * 最重要:
+   * 「2026年1月30日から2027年3月31日まで」のように
+   * 開始日と終了日が両方ある場合は、最初を開始日、最後を終了日として扱う。
+   * AI抽出文やJグランツ本文は途中に余計な文字が混ざることがあるため、
+   * 正規表現1本で範囲を取るより、この方が安定する。
+   */
+  if (allDates.length >= 2) {
+    return {
+      startDate: firstIso,
+      endDate: lastIso,
+      isOpenEnded: false,
+    };
+  }
+
   const rangeMatch = text.match(
-    /(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日?.{0,40}(?:から|より|～|〜|-).{0,40}(?:(20\d{2})年\s*)?(\d{1,2})月\s*(\d{1,2})日?/
+    /(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日?.{0,40}(?:から|より|～|-).{0,40}(?:(20\d{2})年\s*)?(\d{1,2})月\s*(\d{1,2})日?/
   );
 
   if (rangeMatch) {
@@ -68,18 +107,10 @@ export const parsePeriodDatesForStatus = (periodText = '') => {
     };
   }
 
-  const allDates = [
-    ...text.matchAll(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日?/g),
-  ];
-
-  if (allDates.length > 0) {
-    const last = allDates[allDates.length - 1];
-
+  if (allDates.length === 1) {
     return {
       startDate: null,
-      endDate: `${last[1]}-${String(Number(last[2])).padStart(2, '0')}-${String(
-        Number(last[3])
-      ).padStart(2, '0')}`,
+      endDate: firstIso,
       isOpenEnded: false,
     };
   }
@@ -113,13 +144,6 @@ export const forceApplicationStatusByPeriod = (data = {}) => {
       periodText
     );
 
-  if (closedText) {
-    return {
-      ...data,
-      application_status: '受付終了',
-    };
-  }
-
   const badPeriodText =
     /(対象児童|出生|新生児|児童手当|住民登録|給付対象者|支給対象者|から今|から現在|より今|より現在|更新|更新日|お知らせ|一覧|忘れない)/.test(
       periodText
@@ -133,8 +157,33 @@ export const forceApplicationStatusByPeriod = (data = {}) => {
     };
   }
 
-  const { startDate, endDate, isOpenEnded } = parsePeriodDatesForStatus(periodText);
+  const parsed = parsePeriodDatesForStatus(periodText);
+
+  const startDate =
+    parsed.startDate ||
+    normalizeIsoDate(data.application_start_date) ||
+    null;
+
+  const endDate =
+    parsed.endDate ||
+    normalizeIsoDate(data.application_end_date) ||
+    null;
+
+  const isOpenEnded = parsed.isOpenEnded;
   const today = todayJstIsoForStatus();
+
+  /**
+   * 明示的に「受付終了」と書かれていて、かつ終了日が未来ではない場合のみ受付終了。
+   * 終了日が未来なら、AIや既存値の受付終了を上書きして公募中に戻す。
+   */
+  if (closedText && (!endDate || endDate < today)) {
+    return {
+      ...data,
+      application_start_date: startDate || data.application_start_date || null,
+      application_end_date: endDate || data.application_end_date || null,
+      application_status: '受付終了',
+    };
+  }
 
   if (endDate && endDate < today) {
     return {
@@ -167,6 +216,19 @@ export const forceApplicationStatusByPeriod = (data = {}) => {
     return {
       ...data,
       application_start_date: startDate,
+      application_end_date: endDate,
+      application_status: '公募中',
+    };
+  }
+
+  /**
+   * 終了日だけでも未来なら公募中扱い。
+   * JグランツやAI抽出では開始日が欠けるケースがあるため。
+   */
+  if (!startDate && endDate && today <= endDate) {
+    return {
+      ...data,
+      application_start_date: data.application_start_date || null,
       application_end_date: endDate,
       application_status: '公募中',
     };

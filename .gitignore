@@ -18,3 +18,20 @@ ehime-hojo-app/.env.production
 ehime-hojo-app/.env.production.local
 ehime-scraper/.env
 ehime-scraper/.env.local
+
+# local env files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# local backup files
+*_backup_*.jsx
+*_backup_*.js
+*_backup_*.mjs
+*_backup_*.css
+
+# logs
+logs/
+ehime-scraper/logs/
+*.log

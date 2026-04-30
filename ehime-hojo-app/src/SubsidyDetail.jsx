@@ -1,48 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
 import SEO from './components/SEO';
 import SubsidySEO from './components/SubsidySEO';
 import {
-  isItemClosed,
   getPurposeTagList,
   getItemRegionCategories,
 } from './portalHelpers';
 import { supabase } from './lib/supabaseClient';
+import { buildDisplaySubsidy } from './utils/subsidyDetailFormatter';
 
 const isValidHttpUrl = (url) => {
   return typeof url === 'string' && /^https?:\/\/[^\s]+$/i.test(url.trim());
-};
-
-const getOfficialLink = (subsidy) => {
-  if (isValidHttpUrl(subsidy?.official_url)) {
-    return subsidy.official_url.trim();
-  }
-
-  if (isValidHttpUrl(subsidy?.source_url)) {
-    return subsidy.source_url.trim();
-  }
-
-  return '';
-};
-
-const getApplicationStatusLabel = (subsidy, isClosed) => {
-  const status = subsidy?.application_status || '';
-
-  if (isClosed || status === '受付終了') {
-    return '受付終了';
-  }
-
-  if (status === '予告') {
-    return '予告';
-  }
-
-  if (status === '公募中') {
-    return '公募中';
-  }
-
-  return '要確認';
 };
 
 const getStatusStyle = (statusLabel) => {
@@ -73,25 +43,76 @@ const getStatusStyle = (statusLabel) => {
   };
 };
 
-const getPeriodText = (subsidy) => {
+const getPeriodStyle = (statusLabel) => {
+  if (statusLabel === '受付終了') {
+    return {
+      color: '#6b7280',
+      backgroundColor: '#f3f4f6',
+      borderColor: '#e5e7eb',
+    };
+  }
+
+  if (statusLabel === '予告') {
+    return {
+      color: '#92400e',
+      backgroundColor: '#fffbeb',
+      borderColor: '#fde68a',
+    };
+  }
+
+  return {
+    color: '#dc2626',
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  };
+};
+
+const hasDisplayValue = (value) => {
+  const text = String(value || '').trim();
+
+  if (!text) return false;
+  if (text === '不明') return false;
+  if (text === '公式ページをご確認ください。') return true;
+
+  return true;
+};
+
+function InfoSection({ icon, title, children }) {
+  if (!hasDisplayValue(children)) return null;
+
   return (
-    subsidy?.application_period_text ||
-    subsidy?.deadline ||
-    '随時募集（または要確認）'
+    <div>
+      <h4
+        style={{
+          fontSize: '15px',
+          color: '#64748b',
+          marginBottom: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        <span>{icon}</span> {title}
+      </h4>
+
+      <div
+        style={{
+          fontSize: '15px',
+          color: '#1f2937',
+          backgroundColor: '#f9fafb',
+          padding: '16px',
+          borderRadius: '8px',
+          lineHeight: '1.75',
+          border: '1px solid #f1f5f9',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {children}
+      </div>
+    </div>
   );
-};
-
-const toDisplayText = (value, fallback = '詳細は公式ページをご確認ください。') => {
-  if (Array.isArray(value)) {
-    return value.filter(Boolean).join(' / ') || fallback;
-  }
-
-  if (value === null || value === undefined || String(value).trim() === '') {
-    return fallback;
-  }
-
-  return String(value);
-};
+}
 
 export default function SubsidyDetail() {
   const { id: subsidyId } = useParams();
@@ -146,6 +167,26 @@ export default function SubsidyDetail() {
     };
   }, [subsidyId]);
 
+  const purposeTags = useMemo(() => {
+    if (!subsidy) return [];
+    return getPurposeTagList(subsidy);
+  }, [subsidy]);
+
+  const regionTags = useMemo(() => {
+    if (!subsidy) return [];
+    return getItemRegionCategories(subsidy);
+  }, [subsidy]);
+
+  const display = useMemo(() => {
+    if (!subsidy) return null;
+
+    return buildDisplaySubsidy({
+      subsidy,
+      purposeTags,
+      regionTags,
+    });
+  }, [subsidy, purposeTags, regionTags]);
+
   if (loading) {
     return (
       <div
@@ -181,7 +222,7 @@ export default function SubsidyDetail() {
     );
   }
 
-  if (!subsidy) {
+  if (!subsidy || !display) {
     return (
       <div
         style={{
@@ -269,17 +310,12 @@ export default function SubsidyDetail() {
     );
   }
 
-  const isClosed = isItemClosed(subsidy);
-  const statusLabel = getApplicationStatusLabel(subsidy, isClosed);
-  const statusStyle = getStatusStyle(statusLabel);
-  const periodText = getPeriodText(subsidy);
-  const officialLink = getOfficialLink(subsidy);
-
-  const purposeTags = getPurposeTagList(subsidy);
-  const regionTags = getItemRegionCategories(subsidy);
-  const tags = [...new Set([...purposeTags, ...regionTags])].filter(Boolean);
-
+  const statusStyle = getStatusStyle(display.status);
+  const periodStyle = getPeriodStyle(display.status);
   const canonical = `/subsidy/${subsidyId}`;
+  const officialLink = isValidHttpUrl(display.officialUrl)
+    ? display.officialUrl.trim()
+    : '';
 
   return (
     <div
@@ -329,7 +365,11 @@ export default function SubsidyDetail() {
               boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
             }}
           >
-            <div style={{ padding: '40px 48px' }}>
+            <div
+              style={{
+                padding: '40px 48px',
+              }}
+            >
               <div
                 style={{
                   display: 'flex',
@@ -348,7 +388,7 @@ export default function SubsidyDetail() {
                     borderRadius: '4px',
                   }}
                 >
-                  {statusLabel}
+                  {display.status}
                 </span>
 
                 <span
@@ -358,8 +398,8 @@ export default function SubsidyDetail() {
                     fontWeight: 'bold',
                   }}
                 >
-                  📍 {subsidy.organization ? `${subsidy.organization} / ` : ''}
-                  {subsidy.region_text || subsidy.region || '愛媛県'}
+                  📍 {display.organization ? `${display.organization} / ` : ''}
+                  {display.region || '全国'}
                 </span>
               </div>
 
@@ -372,7 +412,7 @@ export default function SubsidyDetail() {
                   fontWeight: '800',
                 }}
               >
-                {subsidy.title}
+                {display.title}
               </h1>
 
               <div
@@ -403,12 +443,10 @@ export default function SubsidyDetail() {
                     lineHeight: '1.4',
                   }}
                 >
-                  {subsidy.amount_text ||
-                    subsidy.amount ||
-                    '公式ページをご確認ください'}
+                  {display.amountMain}
                 </div>
 
-                {subsidy.subsidy_rate_text || subsidy.subsidy_rate ? (
+                {display.amountSub ? (
                   <div
                     style={{
                       fontSize: '14px',
@@ -417,7 +455,7 @@ export default function SubsidyDetail() {
                       lineHeight: '1.6',
                     }}
                   >
-                    補助率：{subsidy.subsidy_rate_text || subsidy.subsidy_rate}
+                    {display.amountSub}
                   </div>
                 ) : null}
               </div>
@@ -440,9 +478,11 @@ export default function SubsidyDetail() {
                     fontSize: '15px',
                     color: '#4b5563',
                     lineHeight: '1.8',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
                   }}
                 >
-                  {subsidy.summary || '詳細は公式ページをご確認ください。'}
+                  {display.overview}
                 </p>
               </div>
 
@@ -453,67 +493,13 @@ export default function SubsidyDetail() {
                   marginBottom: '40px',
                 }}
               >
-                <div>
-                  <h4
-                    style={{
-                      fontSize: '15px',
-                      color: '#64748b',
-                      marginBottom: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <span>🎯</span> 対象事業者
-                  </h4>
+                <InfoSection icon="🎯" title="対象事業者">
+                  {display.targetEntities}
+                </InfoSection>
 
-                  <div
-                    style={{
-                      fontSize: '15px',
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
-                      padding: '16px',
-                      borderRadius: '8px',
-                      lineHeight: '1.6',
-                      border: '1px solid #f1f5f9',
-                    }}
-                  >
-                    {toDisplayText(
-                      subsidy.target_entities || subsidy.target_entities_arr
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h4
-                    style={{
-                      fontSize: '15px',
-                      color: '#64748b',
-                      marginBottom: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <span>🏢</span> 対象となる経費・取り組み
-                  </h4>
-
-                  <div
-                    style={{
-                      fontSize: '15px',
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
-                      padding: '16px',
-                      borderRadius: '8px',
-                      lineHeight: '1.6',
-                      border: '1px solid #f1f5f9',
-                    }}
-                  >
-                    {toDisplayText(
-                      subsidy.target_expenses || subsidy.target_expenses_arr
-                    )}
-                  </div>
-                </div>
+                <InfoSection icon="🏢" title="対象となる経費・取り組み">
+                  {display.targetExpenses}
+                </InfoSection>
 
                 <div>
                   <h4
@@ -532,37 +518,23 @@ export default function SubsidyDetail() {
                   <div
                     style={{
                       fontSize: '15px',
-                      color:
-                        statusLabel === '受付終了'
-                          ? '#6b7280'
-                          : statusLabel === '予告'
-                            ? '#92400e'
-                            : '#dc2626',
+                      color: periodStyle.color,
                       fontWeight: 'bold',
-                      backgroundColor:
-                        statusLabel === '受付終了'
-                          ? '#f3f4f6'
-                          : statusLabel === '予告'
-                            ? '#fffbeb'
-                            : '#fef2f2',
+                      backgroundColor: periodStyle.backgroundColor,
                       padding: '16px',
                       borderRadius: '8px',
-                      border: `1px solid ${
-                        statusLabel === '受付終了'
-                          ? '#e5e7eb'
-                          : statusLabel === '予告'
-                            ? '#fde68a'
-                            : '#fecaca'
-                      }`,
+                      border: `1px solid ${periodStyle.borderColor}`,
                       lineHeight: '1.6',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
                     }}
                   >
-                    {periodText}
+                    {display.applicationPeriod}
                   </div>
                 </div>
               </div>
 
-              {tags.length > 0 && (
+              {display.tags.length > 0 && (
                 <div style={{ marginBottom: '40px' }}>
                   <h4
                     style={{
@@ -581,7 +553,7 @@ export default function SubsidyDetail() {
                       gap: '8px',
                     }}
                   >
-                    {tags.map((tag) => (
+                    {display.tags.map((tag) => (
                       <span
                         key={tag}
                         style={{
