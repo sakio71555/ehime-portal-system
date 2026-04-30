@@ -224,7 +224,7 @@ async function main() {
     .filter((item) => item?.id)
     .map((item) =>
       toUrlEntry({
-        loc: buildUrl(`/subsidy/${item.id}/`),
+        loc: buildUrl(`/subsidy/${item.id}`),
         lastmod: item.fetched_at || today,
         changefreq: 'weekly',
         priority: '0.8',
@@ -237,7 +237,7 @@ async function main() {
     .filter((item) => item?.slug)
     .map((item) =>
       toUrlEntry({
-        loc: buildUrl(`/column/${encodeURIComponent(item.slug)}/`),
+        loc: buildUrl(`/column/${encodeURIComponent(item.slug)}`),
         lastmod: item.published_at || today,
         changefreq: 'monthly',
         priority: '0.7',

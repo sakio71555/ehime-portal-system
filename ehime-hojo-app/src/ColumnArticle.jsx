@@ -4,7 +4,6 @@ import { Helmet } from 'react-helmet-async';
 import Header from './Header';
 import Footer from './Footer';
 import { supabase } from './lib/supabaseClient';
-import { SITE_URL } from './seoConfig';
 
 const ALLOWED_TAGS = new Set([
   'H2',
@@ -334,8 +333,6 @@ export default function ColumnArticle() {
             '愛媛県内の事業者向けに、補助金・助成金に関するお役立ち情報をお届けします。'
           }
         />
-        <meta name="robots" content="index,follow" />
-        <link rel="canonical" href={`${SITE_URL}/column/${slug}/`} />
         <meta
           property="og:title"
           content={`${column.title} | 愛媛の補助金ポータル`}

@@ -312,7 +312,7 @@ export default function SubsidyDetail() {
 
   const statusStyle = getStatusStyle(display.status);
   const periodStyle = getPeriodStyle(display.status);
-  const canonical = `/subsidy/${subsidyId}/`;
+  const canonical = `/subsidy/${subsidyId}`;
   const officialLink = isValidHttpUrl(display.officialUrl)
     ? display.officialUrl.trim()
     : '';
