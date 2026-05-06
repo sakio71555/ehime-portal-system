@@ -201,7 +201,6 @@ export default function SubsidyDetail() {
           title="補助金情報を読み込み中"
           description="愛媛県内の補助金・助成金情報を読み込んでいます。"
           canonical={`/subsidy/${subsidyId || ''}`}
-          noindex
         />
 
         <Header />
