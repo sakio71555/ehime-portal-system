@@ -39,6 +39,42 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://ehime-hojokin.jp/area/matsuyama</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/area/imabari</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/area/niihama</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/purpose/startup</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/purpose/energy-saving</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/purpose/digital</loc>
+    <lastmod>2026-05-06</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
     <loc>https://ehime-hojokin.jp/search?keyword=%E6%9D%BE%E5%B1%B1%E5%B8%82</loc>
     <lastmod>2026-05-06</lastmod>
     <changefreq>weekly</changefreq>
@@ -471,6 +507,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://ehime-hojokin.jp/subsidy/1115</loc>
+    <lastmod>2026-04-16</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://ehime-hojokin.jp/subsidy/1226</loc>
     <lastmod>2026-04-27</lastmod>
     <changefreq>weekly</changefreq>
@@ -874,12 +916,6 @@
   </url>
   <url>
     <loc>https://ehime-hojokin.jp/subsidy/1124</loc>
-    <lastmod>2026-04-16</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://ehime-hojokin.jp/subsidy/1115</loc>
     <lastmod>2026-04-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>

@@ -25,6 +25,12 @@ const STATIC_ROUTES = [
   { path: '/experts', changefreq: 'monthly', priority: '0.7' },
   { path: '/beginners', changefreq: 'monthly', priority: '0.7' },
   { path: '/columns', changefreq: 'weekly', priority: '0.8' },
+  { path: '/area/matsuyama', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/imabari', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/niihama', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/startup', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/energy-saving', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/digital', changefreq: 'daily', priority: '0.85' },
 ];
 
 const SEO_SEARCH_KEYWORDS = [

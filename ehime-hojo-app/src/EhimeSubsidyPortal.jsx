@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Link, Routes, Route, useLocation } from 'react-router-dom';
 import TopPage from './TopPage';
 import ExpertsPage from './ExpertsPage';
 import BeginnersPage from './BeginnersPage';
@@ -66,6 +66,215 @@ function buildBreadcrumbJsonLd(items) {
       item: `https://ehime-hojokin.jp${item.path}`,
     })),
   };
+}
+
+const AREA_LANDING_PAGES = [
+  {
+    slug: 'matsuyama',
+    region: '松山市',
+    title: '松山市の補助金・助成金一覧',
+    description:
+      '松山市で利用できる事業者向け補助金・助成金・支援金をまとめています。創業、設備投資、販路開拓、IT導入などに使える制度を確認できます。',
+  },
+  {
+    slug: 'imabari',
+    region: '今治市',
+    title: '今治市の補助金・助成金一覧',
+    description:
+      '今治市で利用できる事業者向け補助金・助成金・支援金を掲載しています。申請期間、対象者、上限額、公式公募ページを確認できます。',
+  },
+  {
+    slug: 'niihama',
+    region: '新居浜市',
+    title: '新居浜市の補助金・助成金一覧',
+    description:
+      '新居浜市の中小企業・個人事業主向け補助金、助成金、支援制度を探せます。設備投資、創業、雇用、デジタル化などの制度確認に役立ちます。',
+  },
+];
+
+const PURPOSE_LANDING_PAGES = [
+  {
+    slug: 'startup',
+    title: '愛媛県の創業・起業向け補助金',
+    description:
+      '愛媛県内で創業・起業を検討する事業者向けに、開業準備、店舗整備、販路開拓などに活用できる補助金・助成金をまとめています。',
+    keywords: ['創業', '起業', '開業', 'スタートアップ'],
+  },
+  {
+    slug: 'energy-saving',
+    title: '愛媛県の省エネ・設備投資向け補助金',
+    description:
+      '愛媛県内の省エネ設備、機械導入、工場・店舗改修などに活用できる事業者向け補助金・助成金を探せます。',
+    keywords: ['省エネ', '省CO2', '脱炭素', '設備', '機械', '改修'],
+  },
+  {
+    slug: 'digital',
+    title: '愛媛県のIT導入・デジタル化補助金',
+    description:
+      '愛媛県内のIT導入、DX、業務効率化、デジタル化に活用できる事業者向け補助金・助成金をまとめています。',
+    keywords: ['IT', 'デジタル', 'DX', 'システム', '業務効率化'],
+  },
+];
+
+function getSearchableText(item) {
+  return [
+    item?.title,
+    item?.organization,
+    item?.summary,
+    item?.overview,
+    item?.description,
+    item?.region_text,
+    item?.region,
+    item?.prefecture,
+    item?.municipality,
+    item?.target_entities,
+    item?.target_expenses,
+    Array.isArray(item?.target_entities_arr) ? item.target_entities_arr.join(' ') : '',
+    Array.isArray(item?.target_expenses_arr) ? item.target_expenses_arr.join(' ') : '',
+    getPurposeTagList(item).join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function filterItemsForLanding(items, page, type) {
+  if (type === 'area') {
+    return items.filter((item) => {
+      const regions = getItemRegionCategories(item);
+      return regions.includes(page.region) || getSearchableText(item).includes(page.region);
+    });
+  }
+
+  return items.filter((item) => {
+    const text = getSearchableText(item);
+    return page.keywords.some((keyword) => text.includes(keyword.toLowerCase()));
+  });
+}
+
+function SeoLandingPage({ page, type, items, loading, colors }) {
+  const landingItems = useMemo(() => {
+    return filterItemsForLanding(items, page, type)
+      .filter((item) => !isItemClosed(item))
+      .sort((a, b) => getNewArrivalTimestamp(b) - getNewArrivalTimestamp(a));
+  }, [items, page, type]);
+
+  const canonical = type === 'area' ? `/area/${page.slug}` : `/purpose/${page.slug}`;
+  const breadcrumbName = type === 'area' ? '地域から探す' : '目的から探す';
+  const shownItems = landingItems.slice(0, 12);
+
+  return (
+    <>
+      <SEO
+        title={`${page.title}｜事業者向け支援制度`}
+        description={page.description}
+        canonical={canonical}
+        jsonLd={[
+          buildCollectionJsonLd({
+            title: page.title,
+            description: page.description,
+            url: `https://ehime-hojokin.jp${canonical}`,
+          }),
+          buildBreadcrumbJsonLd([
+            { name: 'ホーム', path: '/' },
+            { name: breadcrumbName, path: canonical },
+            { name: page.title, path: canonical },
+          ]),
+        ]}
+      />
+
+      <main className="main-wrapper">
+        <div className="disclaimer-text">
+          掲載情報はAIを活用して収集・整理したデータをもとに作成しています。申請前には必ず各制度の公式ページで最新情報をご確認ください。
+        </div>
+
+        <section style={{ textAlign: 'center', marginBottom: '40px' }}>
+          <h1
+            style={{
+              fontSize: '30px',
+              fontWeight: '800',
+              color: colors.primaryText,
+              margin: '0 0 16px',
+            }}
+          >
+            {page.title}
+          </h1>
+
+          <p
+            style={{
+              maxWidth: '760px',
+              margin: '0 auto',
+              color: colors.textSub,
+              fontSize: '15px',
+              lineHeight: 1.8,
+            }}
+          >
+            {page.description}
+          </p>
+        </section>
+
+        <section style={{ marginBottom: '32px' }}>
+          <div className="title-section">
+            <p style={{ color: colors.textSub, fontSize: '15px', margin: 0 }}>
+              募集中の補助金・助成金
+              <span
+                style={{
+                  fontWeight: 'bold',
+                  fontSize: '24px',
+                  color: colors.primary,
+                  padding: '0 4px',
+                }}
+              >
+                {landingItems.length}
+              </span>
+              件
+            </p>
+
+            <Link
+              to={`/search?keyword=${encodeURIComponent(
+                type === 'area' ? page.region : page.keywords[0]
+              )}`}
+              style={{
+                color: colors.primary,
+                fontSize: '14px',
+                fontWeight: 'bold',
+                textDecoration: 'none',
+              }}
+            >
+              一覧検索でさらに絞り込む →
+            </Link>
+          </div>
+        </section>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '80px 0', color: colors.textSub }}>
+            データを読み込んでいます...
+          </div>
+        ) : shownItems.length > 0 ? (
+          <div className="card-grid">
+            {shownItems.map((item) => (
+              <SubsidyCard key={item.id} item={item} />
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '56px 24px',
+              backgroundColor: 'white',
+              border: `1px solid ${colors.border}`,
+              borderRadius: '16px',
+              color: colors.textSub,
+            }}
+          >
+            現在、この条件で募集中の補助金は見つかりませんでした。関連する制度は一覧検索から確認できます。
+          </div>
+        )}
+
+        <InternalSeoLinks />
+      </main>
+    </>
+  );
 }
 
 function getKeywordFromSearch(location) {
@@ -504,6 +713,38 @@ export default function EhimeSubsidyPortal() {
               </>
             }
           />
+
+          {AREA_LANDING_PAGES.map((page) => (
+            <Route
+              key={page.slug}
+              path={`/area/${page.slug}`}
+              element={
+                <SeoLandingPage
+                  page={page}
+                  type="area"
+                  items={subsidies}
+                  loading={loading}
+                  colors={colors}
+                />
+              }
+            />
+          ))}
+
+          {PURPOSE_LANDING_PAGES.map((page) => (
+            <Route
+              key={page.slug}
+              path={`/purpose/${page.slug}`}
+              element={
+                <SeoLandingPage
+                  page={page}
+                  type="purpose"
+                  items={subsidies}
+                  loading={loading}
+                  colors={colors}
+                />
+              }
+            />
+          ))}
 
           <Route
             path="/search"

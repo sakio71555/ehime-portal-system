@@ -2,21 +2,21 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 const areaLinks = [
-  { label: '松山市の補助金', to: '/search?keyword=松山市' },
-  { label: '今治市の補助金', to: '/search?keyword=今治市' },
+  { label: '松山市の補助金', to: '/area/matsuyama' },
+  { label: '今治市の補助金', to: '/area/imabari' },
+  { label: '新居浜市の補助金', to: '/area/niihama' },
   { label: '西予市の補助金', to: '/search?keyword=西予市' },
   { label: '宇和島市の補助金', to: '/search?keyword=宇和島市' },
   { label: '四国中央市の補助金', to: '/search?keyword=四国中央市' },
-  { label: '新居浜市の補助金', to: '/search?keyword=新居浜市' },
   { label: '西条市の補助金', to: '/search?keyword=西条市' },
   { label: '大洲市の補助金', to: '/search?keyword=大洲市' },
 ];
 
 const purposeLinks = [
-  { label: '創業・起業に使える補助金', to: '/search?keyword=創業' },
+  { label: '創業・起業に使える補助金', to: '/purpose/startup' },
+  { label: '省エネ・設備投資向け補助金', to: '/purpose/energy-saving' },
+  { label: 'IT導入・デジタル化補助金', to: '/purpose/digital' },
   { label: '設備投資に使える補助金', to: '/search?keyword=設備' },
-  { label: '省エネ・再エネ補助金', to: '/search?keyword=省エネ' },
-  { label: 'IT導入・デジタル化補助金', to: '/search?keyword=IT' },
   { label: '販路開拓・展示会補助金', to: '/search?keyword=販路' },
   { label: '農業・就農支援補助金', to: '/search?keyword=農業' },
   { label: '観光・宿泊業向け補助金', to: '/search?keyword=観光' },
