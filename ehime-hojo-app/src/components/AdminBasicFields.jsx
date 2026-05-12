@@ -7,6 +7,26 @@ export default function AdminBasicFields({
   setEditForm,
   currentApplicationStatus,
 }) {
+  const applicationPeriodValue =
+    editForm.application_period_text || editForm.deadline || '';
+  const hasTitle = Boolean(String(editForm.title || '').trim());
+  const shouldShowAskAiButton =
+    hasTitle && isMissingValue(applicationPeriodValue);
+
+  const handleAskAiAboutApplicationPeriod = async (e) => {
+    e.preventDefault();
+
+    const prompt = buildApplicationPeriodPrompt(editForm);
+
+    try {
+      await copyTextToClipboard(prompt);
+    } catch (err) {
+      console.warn('申請期間確認プロンプトのコピーに失敗しました:', err);
+    }
+
+    window.open('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
@@ -78,19 +98,30 @@ export default function AdminBasicFields({
         </div>
 
         <div>
-          <label style={labelStyle}>申請期間</label>
+          <div style={rowBetween}>
+            <label style={labelStyle}>申請期間</label>
+
+            {shouldShowAskAiButton && (
+              <button
+                onClick={handleAskAiAboutApplicationPeriod}
+                style={smallPurpleButton}
+                title="申請期間確認用のプロンプトをコピーしてChatGPTを開きます。開いたら貼り付けてください。"
+              >
+                🤖 AIに聞く
+              </button>
+            )}
+          </div>
+
           <input
             type="text"
-            value={editForm.application_period_text || editForm.deadline || ''}
+            value={applicationPeriodValue}
             onChange={(e) =>
               updateEditForm({
                 application_period_text: e.target.value,
                 deadline: e.target.value,
               })
             }
-            style={getDynamicInputStyle(
-              editForm.application_period_text || editForm.deadline
-            )}
+            style={getDynamicInputStyle(applicationPeriodValue)}
           />
         </div>
       </div>
@@ -168,6 +199,69 @@ export default function AdminBasicFields({
   );
 }
 
+const getPromptValue = (value) => {
+  const text = String(value || '').trim();
+  return text || '未記載';
+};
+
+const buildApplicationPeriodPrompt = (form) => {
+  const title = getPromptValue(form.title);
+  const organization = getPromptValue(form.organization);
+  const region = getPromptValue(form.region_text || form.region);
+
+  return `以下の補助金・助成金について、申請期間を公式情報ベースで確認してください。
+
+補助金名：${title}
+実施機関：${organization}
+地域・場所：${region}
+
+検索するときは、公式URLや取得元URLを前提にしないでください。
+公式URLが別制度や古いページを指している可能性があります。
+次のようなキーワードを優先して、自治体・実施機関などの公式情報を探してください。
+
+検索キーワード例：
+${title} ${region} 申請期間
+${title} ${organization} 申請期間
+
+確認してほしいこと：
+・申請期間
+・受付開始日
+・受付終了日
+・随時募集かどうか
+・募集終了済みかどうか
+
+回答形式：
+申請期間：
+公募ステータス：
+根拠URL：
+補足：
+
+不明な場合は「申請期間不明」と明記してください。
+推測で日付を作らないでください。`;
+};
+
+const copyTextToClipboard = async (text) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
+
 const labelStyle = {
   display: 'block',
   fontWeight: 'bold',
@@ -215,4 +309,19 @@ const smallBlueButton = {
   borderRadius: '4px',
   border: '1px solid #bfdbfe',
   cursor: 'pointer',
+};
+
+const smallPurpleButton = {
+  fontSize: '12px',
+  color: '#7c3aed',
+  fontWeight: 'bold',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
+  padding: '4px 10px',
+  backgroundColor: '#f5f3ff',
+  borderRadius: '4px',
+  border: '1px solid #ddd6fe',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };

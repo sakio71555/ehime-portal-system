@@ -31,6 +31,9 @@ const STATIC_ROUTES = [
   { path: '/purpose/startup', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/energy-saving', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/digital', changefreq: 'daily', priority: '0.85' },
+  { path: '/feature/construction', changefreq: 'daily', priority: '0.85' },
+  { path: '/feature/restaurant-retail', changefreq: 'daily', priority: '0.85' },
+  { path: '/feature/startup-digital', changefreq: 'daily', priority: '0.85' },
 ];
 
 const SEO_SEARCH_KEYWORDS = [

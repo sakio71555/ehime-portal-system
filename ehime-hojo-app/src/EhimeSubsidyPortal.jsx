@@ -116,6 +116,80 @@ const PURPOSE_LANDING_PAGES = [
   },
 ];
 
+const FEATURE_LANDING_PAGES = [
+  {
+    slug: 'construction',
+    title: '建設業・建築業の方必見｜愛媛県で使える補助金・助成金特集',
+    heading: '建設業・建築業の方におすすめの補助金・助成金',
+    description:
+      '愛媛県内の建設業・建築業・工務店・設備工事業の方が確認しておきたい補助金・助成金をまとめています。設備投資、省エネ、IT導入、人材確保、防災・BCP、事業承継など、建設関連事業者が活用しやすい制度を探せます。',
+    keywords: [
+      '建設業',
+      '建築業',
+      '工務店',
+      '設備工事',
+      '設備投資',
+      '省エネ',
+      '人材育成',
+      '雇用',
+      '生産性向上',
+      '業務効率化',
+      '防犯',
+      '防災',
+      'BCP',
+      '事業承継',
+    ],
+  },
+  {
+    slug: 'restaurant-retail',
+    title: '飲食店・小売店の方必見｜愛媛県で使える補助金・助成金特集',
+    heading: '飲食店・小売店の方におすすめの補助金・助成金',
+    description:
+      '愛媛県内の飲食店・小売店・店舗運営事業者の方が確認しておきたい補助金・助成金をまとめています。店舗改装、販路開拓、省力化、デジタル化、キャッシュレス対応、省エネ設備の導入などに活用できる制度を探せます。',
+    keywords: [
+      '飲食業',
+      '飲食店',
+      '小売業',
+      '小売店',
+      '店舗',
+      '店舗改装',
+      '販路開拓',
+      '販路拡大',
+      '設備投資',
+      '省力化',
+      '省人化',
+      'デジタル',
+      'キャッシュレス',
+      '省エネ',
+    ],
+  },
+  {
+    slug: 'startup-digital',
+    title: '創業・IT導入・DXをお考えの方へ｜愛媛県の補助金・助成金特集',
+    heading: '創業・IT導入・DXに使える補助金・助成金',
+    description:
+      '愛媛県内で創業・起業を考えている方、IT導入やDX、業務効率化を進めたい事業者向けの補助金・助成金をまとめています。ホームページ制作、ECサイト、業務システム、クラウドツール、デジタル化、販路開拓などに関する制度を探せます。',
+    keywords: [
+      '起業',
+      '創業',
+      'ベンチャー',
+      'デジタル',
+      '生産性向上',
+      '業務効率化',
+      '販路開拓',
+      '販路拡大',
+      '新規事業',
+      '第二創業',
+      'IT',
+      'DX',
+      'ホームページ',
+      'EC',
+      'システム',
+      'クラウド',
+    ],
+  },
+];
+
 function getSearchableText(item) {
   return [
     item?.title,
@@ -131,6 +205,8 @@ function getSearchableText(item) {
     item?.target_expenses,
     Array.isArray(item?.target_entities_arr) ? item.target_entities_arr.join(' ') : '',
     Array.isArray(item?.target_expenses_arr) ? item.target_expenses_arr.join(' ') : '',
+    Array.isArray(item?.industries) ? item.industries.join(' ') : item?.industries,
+    Array.isArray(item?.industry_tags) ? item.industry_tags.join(' ') : item?.industry_tags,
     getPurposeTagList(item).join(' '),
   ]
     .filter(Boolean)
@@ -159,14 +235,21 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
       .sort((a, b) => getNewArrivalTimestamp(b) - getNewArrivalTimestamp(a));
   }, [items, page, type]);
 
-  const canonical = type === 'area' ? `/area/${page.slug}` : `/purpose/${page.slug}`;
-  const breadcrumbName = type === 'area' ? '地域から探す' : '目的から探す';
+  const canonical =
+    type === 'area'
+      ? `/area/${page.slug}`
+      : type === 'feature'
+        ? `/feature/${page.slug}`
+        : `/purpose/${page.slug}`;
+  const breadcrumbName =
+    type === 'area' ? '地域から探す' : type === 'feature' ? '特集から探す' : '目的から探す';
   const shownItems = landingItems.slice(0, 12);
+  const heading = page.heading || page.title;
 
   return (
     <>
       <SEO
-        title={`${page.title}｜事業者向け支援制度`}
+        title={type === 'feature' ? page.title : `${page.title}｜事業者向け支援制度`}
         description={page.description}
         canonical={canonical}
         jsonLd={[
@@ -190,6 +273,7 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
 
         <section style={{ textAlign: 'center', marginBottom: '40px' }}>
           <h1
+            className="landing-page-title"
             style={{
               fontSize: '30px',
               fontWeight: '800',
@@ -197,10 +281,11 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
               margin: '0 0 16px',
             }}
           >
-            {page.title}
+            {heading}
           </h1>
 
           <p
+            className="landing-page-description"
             style={{
               maxWidth: '760px',
               margin: '0 auto',
@@ -346,6 +431,7 @@ export default function EhimeSubsidyPortal() {
 
   const [subsidies, setSubsidies] = useState([]);
   const [latestColumns, setLatestColumns] = useState([]);
+  const [featureColumns, setFeatureColumns] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [displayMode, setDisplayMode] = useState('open');
@@ -391,10 +477,23 @@ export default function EhimeSubsidyPortal() {
           .from('columns')
           .select('id, title, slug, published_at, created_at, category')
           .eq('is_published', true)
+          .or('category.is.null,category.neq.特集')
           .order('published_at', { ascending: false })
           .limit(3);
 
         if (colData) setLatestColumns(colData);
+
+        const { data: featureData } = await supabase
+          .from('columns')
+          .select(
+            'id, title, slug, published_at, created_at, category, meta_description, thumbnail_text, thumbnail_url'
+          )
+          .eq('is_published', true)
+          .eq('category', '特集')
+          .order('published_at', { ascending: false })
+          .limit(3);
+
+        if (featureData) setFeatureColumns(featureData);
       } catch (err) {
         console.error('データ取得エラー:', err.message);
       } finally {
@@ -635,6 +734,7 @@ export default function EhimeSubsidyPortal() {
                 <TopPage
                   recentSubsidies={recentSubsidies}
                   latestColumns={latestColumns}
+                  featureColumns={featureColumns}
                 />
               </>
             }
@@ -746,6 +846,22 @@ export default function EhimeSubsidyPortal() {
             />
           ))}
 
+          {FEATURE_LANDING_PAGES.map((page) => (
+            <Route
+              key={page.slug}
+              path={`/feature/${page.slug}`}
+              element={
+                <SeoLandingPage
+                  page={page}
+                  type="feature"
+                  items={subsidies}
+                  loading={loading}
+                  colors={colors}
+                />
+              }
+            />
+          ))}
+
           <Route
             path="/search"
             element={
@@ -767,6 +883,7 @@ export default function EhimeSubsidyPortal() {
                   </div>
 
                   <h1
+                    className="search-page-title"
                     style={{
                       fontSize: '28px',
                       fontWeight: '800',
@@ -781,6 +898,7 @@ export default function EhimeSubsidyPortal() {
                   </h1>
 
                   <p
+                    className="search-page-description"
                     style={{
                       maxWidth: '760px',
                       margin: '0 auto 40px',
@@ -793,8 +911,11 @@ export default function EhimeSubsidyPortal() {
                     愛媛県内の事業者向け補助金・助成金を、地域・目的・キーワードから探せます。申請前には必ず公式ページで最新情報をご確認ください。
                   </p>
 
-                  <div className="title-section">
-                    <p style={{ color: colors.textSub, fontSize: '15px', margin: 0 }}>
+                  <div className="title-section search-title-section">
+                    <p
+                      className="search-result-count"
+                      style={{ color: colors.textSub, fontSize: '15px', margin: 0 }}
+                    >
                       該当する補助金・助成金
                       <span
                         style={{
@@ -810,6 +931,7 @@ export default function EhimeSubsidyPortal() {
                     </p>
 
                     <div
+                      className="search-sort-control"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -818,6 +940,7 @@ export default function EhimeSubsidyPortal() {
                       }}
                     >
                       <select
+                        className="search-sort-select"
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
                         style={{

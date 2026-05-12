@@ -15,7 +15,8 @@ function AdminRouter({ session }) {
   const searchParams = new URLSearchParams(window.location.search);
   const tab = searchParams.get('tab');
   if (tab === 'experts') return <AdminExperts />;
-  if (tab === 'columns') return <AdminColumns />;
+  if (tab === 'features') return <AdminColumns initialMode="features" />;
+  if (tab === 'columns') return <AdminColumns initialMode="columns" />;
   return <AdminDashboard />;
 }
 

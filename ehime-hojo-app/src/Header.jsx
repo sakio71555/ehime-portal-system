@@ -204,7 +204,6 @@ export default function Header() {
               border: 'none',
               cursor: 'pointer',
               padding: '4px',
-              display: 'none',
               flexDirection: 'column',
               justifyContent: 'center',
               alignItems: 'center',
@@ -317,6 +316,12 @@ export default function Header() {
       <style>{`
         .header-inner {
           padding: 20px 40px;
+          width: 100%;
+          box-sizing: border-box;
+        }
+
+        .hamburger-btn {
+          display: none;
         }
 
         @media (max-width: 768px) {

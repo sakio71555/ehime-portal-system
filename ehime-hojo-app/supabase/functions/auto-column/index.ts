@@ -45,6 +45,14 @@ serve(async (req: Request) => {
 
     const subsidiesText =
       typeof body?.subsidiesText === "string" ? body.subsidiesText.trim() : "";
+    const articleType =
+      typeof body?.articleType === "string" ? body.articleType.trim() : "column";
+    const preferredCategory =
+      typeof body?.category === "string" ? body.category.trim() : "";
+    const extraInstructions =
+      typeof body?.extraInstructions === "string"
+        ? body.extraInstructions.trim()
+        : "";
 
     if (!title && !subsidiesText) {
       return jsonResponse(
@@ -76,6 +84,7 @@ serve(async (req: Request) => {
 - 使用してよいHTMLタグは <h2>, <h3>, <p>, <ul>, <li>, <strong> のみ。
 - 本文の最後に、必ず公式情報確認を促す注意書きを入れること。
 - 画像プロンプトには「文字を入れない」指定を含めること。
+- 追加指示がある場合は、法令・事実・安全性に反しない範囲で必ず本文に反映すること。
 
 【出力JSON】
 次のキーだけを持つJSONを返してください。
@@ -93,8 +102,15 @@ serve(async (req: Request) => {
 }
 
 【カテゴリ候補】
-基礎知識、用語解説、農業支援、IT・デジタル、設備投資、販路開拓、創業支援、事業承継、人材育成、補助金情報
+特集、基礎知識、用語解説、農業支援、IT・デジタル、設備投資、販路開拓、創業支援、事業承継、人材育成、補助金情報
 `;
+
+    const extraInstructionBlock = extraInstructions
+      ? `
+【必ず反映したい文章・観点】
+${extraInstructions}
+`
+      : "";
 
     const userPrompt = isAutoMode
       ? `
@@ -106,12 +122,23 @@ serve(async (req: Request) => {
 
 【補助金データ】
 ${subsidiesText}
+${extraInstructionBlock}
 `
       : `
 以下のテーマで、補助金・助成金に関するコラム記事を作成してください。
 
 【テーマ】
 ${title}
+
+${articleType === "feature"
+  ? `
+この記事はトップページの「人気の特集から探す」に表示する特集記事です。
+通常のコラムよりも、対象読者・探せる制度・次に取る行動がすぐ分かる構成にしてください。
+category は必ず「特集」にしてください。
+`
+  : ""}
+${preferredCategory ? `希望カテゴリ：${preferredCategory}` : ""}
+${extraInstructionBlock}
 `;
 
     const articleRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -226,6 +253,9 @@ ${title}
       articleData.content ||
       "<p>現在、記事本文を準備中です。詳細は公式情報をご確認ください。</p>";
     articleData.category = articleData.category || "補助金情報";
+    if (preferredCategory) {
+      articleData.category = preferredCategory;
+    }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
 
     let base64Image = "";

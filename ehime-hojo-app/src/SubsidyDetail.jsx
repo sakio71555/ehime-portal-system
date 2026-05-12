@@ -4,6 +4,7 @@ import Header from './Header';
 import Footer from './Footer';
 import SEO from './components/SEO';
 import SubsidySEO from './components/SubsidySEO';
+import './SubsidyDetail.css';
 import {
   getPurposeTagList,
   getItemRegionCategories,
@@ -81,8 +82,9 @@ function InfoSection({ icon, title, children }) {
   if (!hasDisplayValue(children)) return null;
 
   return (
-    <div>
+    <div className="subsidy-detail-info-section">
       <h4
+        className="subsidy-detail-info-heading"
         style={{
           fontSize: '15px',
           color: '#64748b',
@@ -96,6 +98,7 @@ function InfoSection({ icon, title, children }) {
       </h4>
 
       <div
+        className="subsidy-detail-info-box"
         style={{
           fontSize: '15px',
           color: '#1f2937',
@@ -318,6 +321,7 @@ export default function SubsidyDetail() {
 
   return (
     <div
+      className="subsidy-detail-page"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -331,16 +335,18 @@ export default function SubsidyDetail() {
 
       <Header />
 
-      <main style={{ flex: 1, paddingBottom: '80px' }}>
+      <main className="subsidy-detail-main" style={{ flex: 1, paddingBottom: '80px' }}>
         <div
+          className="subsidy-detail-shell"
           style={{
             maxWidth: '800px',
             margin: '40px auto',
             padding: '0 24px',
           }}
         >
-          <div style={{ marginBottom: '24px' }}>
+          <div className="subsidy-detail-back-wrap" style={{ marginBottom: '24px' }}>
             <button
+              className="subsidy-detail-back-button"
               onClick={() => navigate('/search')}
               style={{
                 background: 'none',
@@ -357,6 +363,7 @@ export default function SubsidyDetail() {
           </div>
 
           <article
+            className="subsidy-detail-card"
             style={{
               backgroundColor: 'white',
               borderRadius: '16px',
@@ -365,11 +372,13 @@ export default function SubsidyDetail() {
             }}
           >
             <div
+              className="subsidy-detail-card-inner"
               style={{
                 padding: '40px 48px',
               }}
             >
               <div
+                className="subsidy-detail-meta-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -379,6 +388,7 @@ export default function SubsidyDetail() {
                 }}
               >
                 <span
+                  className="subsidy-detail-status"
                   style={{
                     ...statusStyle,
                     fontSize: '13px',
@@ -391,6 +401,7 @@ export default function SubsidyDetail() {
                 </span>
 
                 <span
+                  className="subsidy-detail-region"
                   style={{
                     fontSize: '14px',
                     color: '#6b7280',
@@ -403,6 +414,7 @@ export default function SubsidyDetail() {
               </div>
 
               <h1
+                className="subsidy-detail-title"
                 style={{
                   fontSize: '28px',
                   color: '#111827',
@@ -415,6 +427,7 @@ export default function SubsidyDetail() {
               </h1>
 
               <div
+                className="subsidy-detail-amount-card"
                 style={{
                   backgroundColor: '#f8fafc',
                   border: '1px solid #e2e8f0',
@@ -424,6 +437,7 @@ export default function SubsidyDetail() {
                 }}
               >
                 <div
+                  className="subsidy-detail-amount-label"
                   style={{
                     fontSize: '14px',
                     color: '#64748b',
@@ -435,6 +449,7 @@ export default function SubsidyDetail() {
                 </div>
 
                 <div
+                  className="subsidy-detail-amount-value"
                   style={{
                     fontSize: '20px',
                     color: '#0f7b6c',
@@ -447,6 +462,7 @@ export default function SubsidyDetail() {
 
                 {display.amountSub ? (
                   <div
+                    className="subsidy-detail-amount-sub"
                     style={{
                       fontSize: '14px',
                       color: '#475569',
@@ -459,8 +475,9 @@ export default function SubsidyDetail() {
                 ) : null}
               </div>
 
-              <div style={{ marginBottom: '32px' }}>
+              <div className="subsidy-detail-section" style={{ marginBottom: '32px' }}>
                 <h3
+                  className="subsidy-detail-section-title"
                   style={{
                     fontSize: '18px',
                     color: '#1f2937',
@@ -473,6 +490,7 @@ export default function SubsidyDetail() {
                 </h3>
 
                 <p
+                  className="subsidy-detail-overview"
                   style={{
                     fontSize: '15px',
                     color: '#4b5563',
@@ -486,6 +504,7 @@ export default function SubsidyDetail() {
               </div>
 
               <div
+                className="subsidy-detail-info-grid"
                 style={{
                   display: 'grid',
                   gap: '24px',
@@ -502,6 +521,7 @@ export default function SubsidyDetail() {
 
                 <div>
                   <h4
+                    className="subsidy-detail-info-heading"
                     style={{
                       fontSize: '15px',
                       color: '#64748b',
@@ -515,6 +535,7 @@ export default function SubsidyDetail() {
                   </h4>
 
                   <div
+                    className="subsidy-detail-period-box"
                     style={{
                       fontSize: '15px',
                       color: periodStyle.color,
@@ -534,8 +555,9 @@ export default function SubsidyDetail() {
               </div>
 
               {display.tags.length > 0 && (
-                <div style={{ marginBottom: '40px' }}>
+                <div className="subsidy-detail-tags-section" style={{ marginBottom: '40px' }}>
                   <h4
+                    className="subsidy-detail-tags-heading"
                     style={{
                       fontSize: '14px',
                       color: '#64748b',
@@ -546,6 +568,7 @@ export default function SubsidyDetail() {
                   </h4>
 
                   <div
+                    className="subsidy-detail-tags"
                     style={{
                       display: 'flex',
                       flexWrap: 'wrap',
@@ -554,6 +577,7 @@ export default function SubsidyDetail() {
                   >
                     {display.tags.map((tag) => (
                       <span
+                        className="subsidy-detail-tag"
                         key={tag}
                         style={{
                           backgroundColor: '#ecfdf5',
@@ -572,9 +596,10 @@ export default function SubsidyDetail() {
                 </div>
               )}
 
-              <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+              <div className="subsidy-detail-official-wrap" style={{ textAlign: 'center', marginBottom: '32px' }}>
                 {officialLink ? (
                   <a
+                    className="subsidy-detail-official-link"
                     href={officialLink}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -594,6 +619,7 @@ export default function SubsidyDetail() {
                   </a>
                 ) : (
                   <div
+                    className="subsidy-detail-official-empty"
                     style={{
                       display: 'inline-block',
                       backgroundColor: '#f3f4f6',
@@ -611,6 +637,7 @@ export default function SubsidyDetail() {
               </div>
 
               <div
+                className="subsidy-detail-disclaimer"
                 style={{
                   fontSize: '13px',
                   color: '#6b7280',
@@ -628,6 +655,7 @@ export default function SubsidyDetail() {
               </div>
 
               <div
+                className="subsidy-detail-consult-box"
                 style={{
                   padding: '32px',
                   backgroundColor: '#f4f6f5',
@@ -636,6 +664,7 @@ export default function SubsidyDetail() {
                 }}
               >
                 <h3
+                  className="subsidy-detail-consult-title"
                   style={{
                     fontSize: '18px',
                     color: '#2d3b33',
@@ -648,6 +677,7 @@ export default function SubsidyDetail() {
                 </h3>
 
                 <p
+                  className="subsidy-detail-consult-text"
                   style={{
                     fontSize: '15px',
                     color: '#4b5550',
@@ -662,6 +692,7 @@ export default function SubsidyDetail() {
                 </p>
 
                 <div
+                  className="subsidy-detail-consult-actions"
                   style={{
                     display: 'flex',
                     gap: '16px',
@@ -669,6 +700,7 @@ export default function SubsidyDetail() {
                   }}
                 >
                   <button
+                    className="subsidy-detail-consult-button"
                     onClick={() => navigate('/experts')}
                     style={{
                       flex: 1,

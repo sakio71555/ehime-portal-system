@@ -23,6 +23,12 @@ const purposeLinks = [
   { label: '人材育成・雇用関連助成金', to: '/search?keyword=人材' },
 ];
 
+const featureLinks = [
+  { label: '建設業・建築業の方必見', to: '/feature/construction' },
+  { label: '飲食店・小売店の方必見', to: '/feature/restaurant-retail' },
+  { label: '創業・IT導入・DXをお考えの方へ', to: '/feature/startup-digital' },
+];
+
 const guideLinks = [
   { label: '補助金の基礎知識', to: '/beginners' },
   { label: '補助金シミュレーター', to: '/simulator' },
@@ -120,6 +126,12 @@ export default function InternalSeoLinks() {
         title="目的から補助金・助成金を探す"
         description="創業、設備投資、省エネ、IT導入、販路開拓など、利用目的に合わせて支援制度を探せます。"
         links={purposeLinks}
+      />
+
+      <LinkGroup
+        title="人気の特集から補助金・助成金を探す"
+        description="業種や利用シーンに合わせて、確認しておきたい補助金・助成金をまとめています。"
+        links={featureLinks}
       />
 
       <LinkGroup

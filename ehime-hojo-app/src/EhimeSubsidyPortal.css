@@ -167,6 +167,13 @@ body, html {
    スマホ表示用（レスポンシブ）
 ========================================= */
 @media (max-width: 768px) {
+  html,
+  body,
+  #root,
+  .portal-container {
+    overflow-x: hidden !important;
+  }
+
   .app-header { 
     padding: 12px 16px; 
     flex-direction: column; 
@@ -182,29 +189,253 @@ body, html {
     gap: 12px; 
     font-size: 13px; 
   }
+
+  .hamburger-btn {
+    display: flex !important;
+    flex-shrink: 0 !important;
+    margin-left: auto !important;
+  }
+
   .main-wrapper { 
     padding: 0 16px; 
   }
+
+  .disclaimer-text {
+    margin: 22px 0 18px !important;
+    font-size: 12px !important;
+    line-height: 1.75 !important;
+    text-align: left !important;
+    color: #64748b !important;
+  }
+
+  .search-page-title {
+    font-size: 20px !important;
+    line-height: 1.4 !important;
+    margin: 0 0 12px !important;
+    text-align: left !important;
+    letter-spacing: 0 !important;
+    overflow-wrap: anywhere !important;
+    line-break: anywhere !important;
+  }
+
+  .search-page-description {
+    margin: 0 0 24px !important;
+    text-align: left !important;
+    font-size: 13px !important;
+    line-height: 1.8 !important;
+    overflow-wrap: anywhere !important;
+    line-break: anywhere !important;
+  }
+
   .title-section { 
     flex-direction: column; 
     align-items: flex-start; 
     gap: 16px; 
     margin-bottom: 24px; 
   }
+
+  .search-title-section {
+    gap: 12px !important;
+    padding: 14px 16px !important;
+    margin-bottom: 18px !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 14px !important;
+    background: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04) !important;
+  }
+
+  .search-result-count {
+    font-size: 13px !important;
+    width: 100% !important;
+  }
+
+  .search-sort-control,
+  .search-sort-select {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .search-sort-select {
+    min-height: 44px !important;
+    font-size: 14px !important;
+  }
+
   .layout-grid { 
     flex-direction: column; 
     padding: 0 16px 40px; 
-    gap: 24px; 
+    gap: 18px; 
+    min-width: 0 !important;
   }
+
+  .layout-grid > * {
+    min-width: 0 !important;
+  }
+
   .sidebar { 
     width: 100%; 
     position: static; 
-    max-height: none; 
-    overflow-y: visible; 
+    max-height: min(58vh, 460px); 
+    overflow-y: auto; 
+    gap: 12px !important;
+    padding: 0 2px 4px !important;
+    box-sizing: border-box !important;
+    overscroll-behavior: contain;
   }
+
+  .sidebar > div {
+    padding: 16px !important;
+    border-radius: 14px !important;
+    box-shadow: 0 3px 12px rgba(15, 23, 42, 0.04) !important;
+  }
+
+  .sidebar .custom-scrollbar {
+    max-height: 170px !important;
+    gap: 10px !important;
+  }
+
   .card-grid { 
     grid-template-columns: 1fr; 
+    gap: 16px !important;
+    width: 100% !important;
+    min-width: 0 !important;
   }
+
+  .content-area {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .portal-subsidy-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 18px !important;
+    border-radius: 14px !important;
+    gap: 14px !important;
+    overflow: hidden !important;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
+  }
+
+  .portal-subsidy-card-header {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    min-height: 0 !important;
+    align-items: flex-start !important;
+  }
+
+  .portal-subsidy-status-box {
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    padding: 7px 12px !important;
+    border-radius: 999px !important;
+    font-size: 13px !important;
+    letter-spacing: 0 !important;
+  }
+
+  .portal-subsidy-title-wrap {
+    width: 100% !important;
+    height: auto !important;
+    min-width: 0 !important;
+    display: block !important;
+  }
+
+  .portal-subsidy-title {
+    font-size: 17px !important;
+    line-height: 1.45 !important;
+    letter-spacing: 0 !important;
+    max-height: none !important;
+    -webkit-line-clamp: 3 !important;
+    overflow-wrap: anywhere !important;
+    line-break: anywhere !important;
+    word-break: normal !important;
+  }
+
+  .portal-subsidy-meta {
+    flex-direction: column !important;
+    gap: 7px !important;
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+  }
+
+  .portal-subsidy-meta-item {
+    min-width: 0 !important;
+    align-items: flex-start !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .portal-subsidy-amount-box {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 14px !important;
+    border-radius: 10px !important;
+  }
+
+  .portal-subsidy-amount-label {
+    font-size: 12px !important;
+    white-space: normal !important;
+  }
+
+  .portal-subsidy-amount-value {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+    -webkit-line-clamp: 3 !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+  }
+
+  .portal-subsidy-summary {
+    font-size: 14px !important;
+    line-height: 1.75 !important;
+    -webkit-line-clamp: 4 !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+  }
+
+  .portal-subsidy-tags {
+    gap: 6px !important;
+  }
+
+  .portal-subsidy-tags span {
+    font-size: 12px !important;
+    padding: 5px 10px !important;
+  }
+
+  .portal-subsidy-footer {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    margin-top: 8px !important;
+  }
+
+  .portal-subsidy-detail-link {
+    font-size: 14px !important;
+    white-space: normal !important;
+  }
+
+  .portal-subsidy-actions {
+    width: 100% !important;
+    flex-direction: column-reverse !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .portal-subsidy-note {
+    width: 100% !important;
+    text-align: left !important;
+    font-size: 11px !important;
+    line-height: 1.5 !important;
+  }
+
+  .portal-subsidy-official-button {
+    width: 100% !important;
+    min-height: 42px !important;
+    padding: 10px 14px !important;
+    border-radius: 8px !important;
+  }
+
   .amount-box { 
     font-size: 20px !important; 
   }
@@ -212,5 +443,208 @@ body, html {
     width: 40px; 
     height: 40px; 
     font-size: 14px; 
+  }
+
+  .top-hero-carousel {
+    padding: 18px 0 44px !important;
+    margin-bottom: 28px !important;
+  }
+
+  .top-page-content {
+    padding: 0 16px 48px !important;
+  }
+
+  .top-action-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    margin-bottom: 44px !important;
+  }
+
+  .top-action-grid > div {
+    padding: 22px 18px !important;
+    border-radius: 12px !important;
+  }
+
+  .top-section-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    padding-bottom: 14px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .top-section-title {
+    min-width: 0 !important;
+    font-size: 22px !important;
+    line-height: 1.25 !important;
+    letter-spacing: 0 !important;
+    width: 100% !important;
+    flex: none !important;
+  }
+
+  .top-section-title-ja {
+    max-width: none !important;
+    font-size: 21px !important;
+  }
+
+  .top-section-action {
+    align-self: flex-start !important;
+    flex-shrink: 0 !important;
+    padding: 8px 14px !important;
+    border-radius: 999px !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+  }
+
+  .top-list {
+    gap: 10px !important;
+    margin-top: 18px !important;
+  }
+
+  .top-list-item {
+    display: grid !important;
+    grid-template-columns: auto 1fr !important;
+    gap: 10px 12px !important;
+    align-items: center !important;
+    padding: 15px 16px !important;
+    border-radius: 10px !important;
+    background-color: #ffffff !important;
+    border: 1px solid #edf1ef !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03) !important;
+  }
+
+  .top-list-date {
+    font-size: 13px !important;
+    letter-spacing: 0 !important;
+    color: #64748b !important;
+  }
+
+  .top-list-badge-wrap {
+    justify-self: start !important;
+  }
+
+  .top-list-badge {
+    min-width: 0 !important;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    border-radius: 6px !important;
+    white-space: nowrap !important;
+  }
+
+  .top-list-text {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+
+  .top-list-title {
+    font-size: 15px !important;
+    line-height: 1.55 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    font-weight: 700 !important;
+  }
+
+  .top-feature-section {
+    margin-bottom: 44px !important;
+  }
+
+  .top-feature-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .top-feature-card {
+    padding: 18px 16px !important;
+    border-radius: 12px !important;
+  }
+
+  .top-feature-icon {
+    font-size: 26px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .landing-page-title {
+    font-size: 24px !important;
+    line-height: 1.35 !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    margin-bottom: 14px !important;
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+  }
+
+  .landing-page-description {
+    text-align: left !important;
+    font-size: 14px !important;
+    line-height: 1.85 !important;
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .simulator-banner {
+    padding: 24px 20px !important;
+    border-radius: 14px !important;
+    align-items: flex-start !important;
+  }
+
+  .simulator-banner > div:last-child {
+    width: 100% !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .header-inner {
+    padding: 14px 18px !important;
+  }
+
+  .header-inner img {
+    height: 34px !important;
+  }
+
+  .hamburger-btn {
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  .top-section-title-ja {
+    font-size: 20px !important;
+  }
+
+  .top-list-item {
+    padding: 14px !important;
+  }
+
+  .layout-grid {
+    padding: 0 12px 36px !important;
+  }
+
+  .main-wrapper {
+    padding: 0 12px !important;
+  }
+
+  .portal-subsidy-card {
+    padding: 16px !important;
+  }
+
+  .portal-subsidy-card-header {
+    gap: 10px !important;
+  }
+
+  .portal-subsidy-status-box {
+    padding: 6px 11px !important;
+    font-size: 12px !important;
+  }
+
+  .portal-subsidy-title {
+    font-size: 16px !important;
   }
 }

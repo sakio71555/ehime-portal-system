@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 
-export default function AdminColumns() {
+const FEATURE_CATEGORY = '特集';
+
+export default function AdminColumns({ initialMode = 'columns' }) {
   const [columns, setColumns] = useState([]);
+  const [activeMode, setActiveMode] = useState(initialMode);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -33,6 +36,10 @@ export default function AdminColumns() {
   }, [fetchColumns]);
 
   useEffect(() => {
+    setActiveMode(initialMode);
+  }, [initialMode]);
+
+  useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
@@ -58,6 +65,33 @@ export default function AdminColumns() {
       default:
         return '#374151';
     }
+  };
+
+  const buildGenerationPrompt = (column) => {
+    const baseTitle = column.title || '';
+    const instructions = (column.ai_instructions || '').trim();
+    const isFeatureArticle = column.category === FEATURE_CATEGORY;
+
+    if (!instructions) return baseTitle;
+
+    return `
+【記事タイトル・テーマ】
+${baseTitle}
+
+【記事種別】
+${isFeatureArticle ? 'トップページの「人気の特集から探す」に表示する特集記事' : '通常コラム記事'}
+
+【必ず反映してほしい文章・素材】
+${instructions}
+
+【執筆ルール】
+- 上記の素材を無視せず、本文の主要内容として整理してください。
+- 丸写しだけにせず、読者が読みやすい見出し構成にしてください。
+- 制度名・市町村名・注意点はできるだけ残してください。
+- 日付、受付状況、金額などは断定しすぎず、公式情報の確認を促してください。
+- HTML本文は <h2>, <h3>, <p>, <ul>, <li>, <strong> を中心にしてください。
+${isFeatureArticle ? '- category は必ず「特集」にしてください。' : ''}
+`.trim();
   };
 
   const base64ToBlob = (base64Image) => {
@@ -108,9 +142,16 @@ export default function AdminColumns() {
     setIsGeneratingTitle(true);
 
     try {
+      const isFeatureArticle = editingColumn.category === FEATURE_CATEGORY;
+      const generationPrompt = buildGenerationPrompt(editingColumn);
+
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
-          title: editingColumn.title,
+          title: generationPrompt,
+          articleType: isFeatureArticle ? 'feature' : 'column',
+          category: editingColumn.category || '',
+          // 追加指示は title 側にも埋め込む。未デプロイの旧Edge Functionでも反映されるようにするため。
+          extraInstructions: '',
         },
       });
 
@@ -137,7 +178,10 @@ export default function AdminColumns() {
         seo_title: articleData.seo_title || '',
         meta_description: articleData.meta_description || '',
         content: articleData.content || '',
-        category: articleData.category || prev.category || '基礎知識',
+        category:
+          prev.category === FEATURE_CATEGORY
+            ? FEATURE_CATEGORY
+            : articleData.category || prev.category || '基礎知識',
         thumbnail_text: articleData.thumbnail_text || '',
         thumbnail_url: finalThumbnailUrl,
         tags: articleData.tags || [],
@@ -324,6 +368,26 @@ export default function AdminColumns() {
     window.location.href = '/';
   };
 
+  const createColumnDraft = (overrides = {}) => ({
+    title: '',
+    slug: `guide-${Date.now()}`,
+    category: '基礎知識',
+    seo_title: '',
+    meta_description: '',
+    content: '',
+    thumbnail_url: '',
+    thumbnail_text: '',
+    tags: [],
+    is_published: false,
+    ai_instructions: '',
+    ...overrides,
+  });
+
+  const isFeatureMode = activeMode === 'features';
+  const visibleColumns = columns.filter((col) =>
+    isFeatureMode ? col.category === FEATURE_CATEGORY : col.category !== FEATURE_CATEGORY
+  );
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: 'sans-serif' }}>
       <header style={{ backgroundColor: '#111827', color: 'white', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '64px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
@@ -337,9 +401,12 @@ export default function AdminColumns() {
             <a href="/admin?tab=experts" style={{ display: 'flex', alignItems: 'center', padding: '0 16px', color: '#9ca3af', textDecoration: 'none', fontSize: '15px', borderBottom: '3px solid transparent' }}>
               🤝 専門家管理
             </a>
-            <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px', color: 'white', fontSize: '15px', fontWeight: 'bold', borderBottom: '3px solid #10b981', backgroundColor: '#1f2937' }}>
+            <a href="/admin?tab=columns" style={{ display: 'flex', alignItems: 'center', padding: '0 16px', color: isFeatureMode ? '#9ca3af' : 'white', textDecoration: 'none', fontSize: '15px', fontWeight: isFeatureMode ? '500' : 'bold', borderBottom: isFeatureMode ? '3px solid transparent' : '3px solid #10b981', backgroundColor: isFeatureMode ? 'transparent' : '#1f2937' }}>
               📝 コラム管理
-            </div>
+            </a>
+            <a href="/admin?tab=features" style={{ display: 'flex', alignItems: 'center', padding: '0 16px', color: isFeatureMode ? 'white' : '#9ca3af', textDecoration: 'none', fontSize: '15px', fontWeight: isFeatureMode ? 'bold' : '500', borderBottom: isFeatureMode ? '3px solid #f59e0b' : '3px solid transparent', backgroundColor: isFeatureMode ? '#1f2937' : 'transparent' }}>
+              ⭐ 特集記事制作
+            </a>
           </nav>
         </div>
 
@@ -353,7 +420,9 @@ export default function AdminColumns() {
           <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#111827' }}>
-                📝 コラムの編集・作成
+                {editingColumn.category === FEATURE_CATEGORY
+                  ? '⭐ 特集記事の編集・作成'
+                  : '📝 コラムの編集・作成'}
               </h2>
 
               <button onClick={() => setEditingColumn(null)} style={{ backgroundColor: '#f3f4f6', color: '#4b5563', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
@@ -407,10 +476,41 @@ export default function AdminColumns() {
                   type="button"
                   onClick={handleGenerateFromTitle}
                   disabled={isGeneratingTitle}
-                  style={{ backgroundColor: isGeneratingTitle ? '#9ca3af' : '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isGeneratingTitle ? 'not-allowed' : 'pointer', border: 'none', fontSize: '14px', whiteSpace: 'nowrap', transition: 'background-color 0.2s' }}
+                  style={{ backgroundColor: isGeneratingTitle ? '#9ca3af' : editingColumn.category === FEATURE_CATEGORY ? '#f59e0b' : '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isGeneratingTitle ? 'not-allowed' : 'pointer', border: 'none', fontSize: '14px', whiteSpace: 'nowrap', transition: 'background-color 0.2s' }}
                 >
-                  {isGeneratingTitle ? '🔄 AI執筆・画像生成中...' : '🤖 タイトルからAI自動執筆'}
+                  {isGeneratingTitle
+                    ? '🔄 AI執筆・画像生成中...'
+                    : editingColumn.category === FEATURE_CATEGORY
+                      ? '⭐ 特集記事をAI自動執筆'
+                      : '🤖 タイトルからAI自動執筆'}
                 </button>
+              </div>
+
+              <div style={{ backgroundColor: editingColumn.category === FEATURE_CATEGORY ? '#fffbeb' : '#f8fafc', border: editingColumn.category === FEATURE_CATEGORY ? '1px solid #fde68a' : '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>
+                  AIに入れてほしい文章・観点（任意）
+                </label>
+
+                <textarea
+                  rows="4"
+                  placeholder={
+                    editingColumn.category === FEATURE_CATEGORY
+                      ? '例：この特集では、愛媛県内の建設業者向けに、設備投資・省エネ・人材確保に使える補助金を中心に紹介してください。長文の素材文章をそのまま貼ってもOKです。'
+                      : '例：初心者向けに、専門用語を避けて説明してください。最後に公式情報確認の注意書きを入れてください。'
+                  }
+                  value={editingColumn.ai_instructions || ''}
+                  onChange={(e) =>
+                    setEditingColumn({
+                      ...editingColumn,
+                      ai_instructions: e.target.value,
+                    })
+                  }
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', resize: 'vertical', fontSize: '14px', lineHeight: '1.6', backgroundColor: 'white' }}
+                />
+
+                <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '12px', lineHeight: 1.6 }}>
+                  ここに入力した内容はAI生成時だけ使います。長文の素材メモも、記事本文に反映されるようAIへまとめて渡します。
+                </p>
               </div>
 
               <div style={{ display: 'flex', gap: '16px' }}>
@@ -495,73 +595,85 @@ export default function AdminColumns() {
           </div>
         ) : (
           <>
-            <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', marginBottom: '32px', borderTop: '6px solid #10b981' }}>
+            <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', marginBottom: '32px', borderTop: isFeatureMode ? '6px solid #f59e0b' : '6px solid #10b981' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
                 <div>
                   <h2 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 'bold', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    🤖 AI自動コラム生成
+                    {isFeatureMode ? '⭐ 特集記事制作' : '🤖 AI自動コラム生成'}
                   </h2>
 
                   <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
-                    現在公開中の補助金データから、AI編集長が今一番アツい制度を1つ選び出し、SEO最適化されたコラム記事とアイキャッチ画像を全自動で生成します。
+                    {isFeatureMode
+                      ? 'トップページの「人気の特集から探す」に表示する記事を作成します。公開中の特集記事が最大3件表示されます。'
+                      : '現在公開中の補助金データから、AI編集長が今一番アツい制度を1つ選び出し、SEO最適化されたコラム記事とアイキャッチ画像を全自動で生成します。'}
                   </p>
                 </div>
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button
                     onClick={() =>
-                      setEditingColumn({
-                        title: '',
-                        slug: `guide-${Date.now()}`,
-                        category: '基礎知識',
-                        seo_title: '',
-                        meta_description: '',
-                        content: '',
-                        thumbnail_url: '',
-                        thumbnail_text: '',
-                        tags: [],
-                        is_published: false,
-                      })
+                      setEditingColumn(
+                        createColumnDraft(
+                          isFeatureMode
+                            ? {
+                                slug: `feature-${Date.now()}`,
+                                category: FEATURE_CATEGORY,
+                              }
+                            : undefined
+                        )
+                      )
                     }
-                    style={{ backgroundColor: 'white', color: '#4b5563', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', whiteSpace: 'nowrap' }}
+                    style={{ backgroundColor: isFeatureMode ? '#fef3c7' : 'white', color: isFeatureMode ? '#92400e' : '#4b5563', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', border: isFeatureMode ? '1px solid #fde68a' : '1px solid #d1d5db', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', whiteSpace: 'nowrap' }}
                   >
-                    ✍️ 手動で新規作成
+                    {isFeatureMode ? '⭐ 特集記事を新規作成' : '✍️ 手動で新規作成'}
                   </button>
 
-                  <button onClick={handleStartAutoColumn} disabled={isProcessing} style={{ backgroundColor: isProcessing ? '#9ca3af' : '#10b981', color: 'white', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', boxShadow: isProcessing ? 'none' : '0 4px 6px rgba(16, 185, 129, 0.3)', whiteSpace: 'nowrap' }}>
-                    {isProcessing ? '🔄 執筆＆描画中...' : '✒️ AIに今週のおすすめ記事を書かせる'}
-                  </button>
+                  {!isFeatureMode && (
+                    <button onClick={handleStartAutoColumn} disabled={isProcessing} style={{ backgroundColor: isProcessing ? '#9ca3af' : '#10b981', color: 'white', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', boxShadow: isProcessing ? 'none' : '0 4px 6px rgba(16, 185, 129, 0.3)', whiteSpace: 'nowrap' }}>
+                      {isProcessing ? '🔄 執筆＆描画中...' : '✒️ AIに今週のおすすめ記事を書かせる'}
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div style={{ backgroundColor: '#111827', borderRadius: '8px', padding: '16px', overflowY: 'auto', height: '180px', fontFamily: 'monospace', fontSize: '13px', border: '1px solid #374151' }}>
-                {logs.length === 0 ? (
-                  <div style={{ color: '#6b7280', textAlign: 'center', marginTop: '60px' }}>
-                    ボタンを押すと、AI編集長の作業ログがここに表示されます
-                  </div>
-                ) : (
-                  logs.map((log, idx) => (
-                    <div key={idx} style={{ color: getLogColor(log.type), marginBottom: '8px', lineHeight: '1.4' }}>
-                      <span style={{ color: '#6b7280', marginRight: '8px' }}>[{log.time}]</span>
-                      {log.msg}
+              {isFeatureMode ? (
+                <div style={{ backgroundColor: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '8px', padding: '16px', fontSize: '14px', lineHeight: 1.7 }}>
+                  特集記事はカテゴリが「特集」の公開記事だけがトップページに表示されます。記事作成画面の「AIに入れてほしい文章・観点」に、必ず入れたい導入文・対象業種・紹介したい補助金テーマを書いてからAI生成してください。
+                </div>
+              ) : (
+                <div style={{ backgroundColor: '#111827', borderRadius: '8px', padding: '16px', overflowY: 'auto', height: '180px', fontFamily: 'monospace', fontSize: '13px', border: '1px solid #374151' }}>
+                  {logs.length === 0 ? (
+                    <div style={{ color: '#6b7280', textAlign: 'center', marginTop: '60px' }}>
+                      ボタンを押すと、AI編集長の作業ログがここに表示されます
                     </div>
-                  ))
+                  ) : (
+                    logs.map((log, idx) => (
+                      <div key={idx} style={{ color: getLogColor(log.type), marginBottom: '8px', lineHeight: '1.4' }}>
+                        <span style={{ color: '#6b7280', marginRight: '8px' }}>[{log.time}]</span>
+                        {log.msg}
+                      </div>
+                    ))
+                  )}
+                  <div ref={logEndRef} />
+                </div>
                 )}
-                <div ref={logEndRef} />
-              </div>
             </div>
 
             <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#334155' }}>
-              📝 作成済みのコラム ({columns.length}件)
+              {isFeatureMode
+                ? `⭐ 作成済みの特集記事 (${visibleColumns.length}件)`
+                : `📝 作成済みのコラム (${visibleColumns.length}件)`}
             </h3>
 
-            {columns.length === 0 ? (
+            {visibleColumns.length === 0 ? (
               <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>
-                まだ作成されたコラムはありません。
+                {isFeatureMode
+                  ? 'まだ作成された特集記事はありません。'
+                  : 'まだ作成されたコラムはありません。'}
               </div>
             ) : (
               <div style={{ display: 'grid', gap: '16px' }}>
-                {columns.map((col) => (
+                {visibleColumns.map((col) => (
                   <div key={col.id} style={{ display: 'flex', gap: '20px', alignItems: 'center', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: 'white' }}>
                     <div style={{ width: '120px', height: '80px', borderRadius: '8px', backgroundColor: '#e2e8f0', overflow: 'hidden', flexShrink: 0 }}>
                       {col.thumbnail_url ? (

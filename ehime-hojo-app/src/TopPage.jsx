@@ -17,6 +17,40 @@ const BANNERS = [
   '/banner3.jpg',
 ];
 
+const FALLBACK_FEATURE_CARDS = [
+  {
+    icon: '🏗️',
+    title: '建設業・建築業の方必見',
+    description: '設備投資、省エネ、IT導入、人材確保、防災・BCPなどの制度を探せます。',
+    path: '/feature/construction',
+  },
+  {
+    icon: '🍽️',
+    title: '飲食店・小売店の方必見',
+    description: '店舗改装、販路開拓、省力化、デジタル化、省エネ設備などに使える制度を確認できます。',
+    path: '/feature/restaurant-retail',
+  },
+  {
+    icon: '💻',
+    title: '創業・IT導入・DXをお考えの方へ',
+    description: '創業、ホームページ制作、EC、業務システム、DXに関する制度を探せます。',
+    path: '/feature/startup-digital',
+  },
+];
+
+const getFeatureCardIcon = (feature) => {
+  const text = `${feature?.title || ''} ${feature?.category || ''}`;
+
+  if (text.includes('建設') || text.includes('建築')) return '🏗️';
+  if (text.includes('飲食') || text.includes('小売') || text.includes('店舗')) return '🍽️';
+  if (text.includes('創業') || text.includes('起業')) return '🚀';
+  if (text.includes('IT') || text.includes('DX') || text.includes('デジタル')) return '💻';
+  if (text.includes('農業') || text.includes('林業') || text.includes('水産')) return '🌱';
+  if (text.includes('設備') || text.includes('省エネ')) return '⚙️';
+
+  return '⭐';
+};
+
 const getCarouselSlideWidth = () => {
   if (typeof window === 'undefined') return 1100;
 
@@ -55,7 +89,7 @@ const getCategoryColor = (category) => {
   return '#3b82f6';
 };
 
-export default function TopPage({ recentSubsidies, latestColumns }) {
+export default function TopPage({ recentSubsidies, latestColumns, featureColumns }) {
   const navigate = useNavigate();
 
   /**
@@ -82,6 +116,24 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
     if (BANNERS.length === 0) return 0;
     return ((slideIndex - 1) % BANNERS.length + BANNERS.length) % BANNERS.length;
   }, [slideIndex]);
+
+  const featureCards = useMemo(() => {
+    if (featureColumns?.length > 0) {
+      return featureColumns.map((feature) => ({
+        id: feature.id,
+        icon: getFeatureCardIcon(feature),
+        title: feature.title,
+        description:
+          feature.meta_description ||
+          feature.thumbnail_text ||
+          '愛媛県内の補助金・助成金をテーマ別にわかりやすく紹介します。',
+        path: `/column/${feature.slug}`,
+        thumbnailUrl: feature.thumbnail_url,
+      }));
+    }
+
+    return FALLBACK_FEATURE_CARDS;
+  }, [featureColumns]);
 
   const slideHeight = Math.round(slideWidth * 0.375);
   const trackTranslate = `calc(50vw - ${slideWidth / 2}px - ${
@@ -165,6 +217,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
     <>
       {/* カルーセル：画像を切らずに、左右チラ見せ＋3枚無限ループ */}
       <section
+        className="top-hero-carousel"
         style={{
           position: 'relative',
           width: '100vw',
@@ -367,9 +420,13 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
         </div>
       </section>
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '0 24px 80px' }}>
+      <div
+        className="top-page-content"
+        style={{ maxWidth: '1000px', margin: '0 auto', padding: '0 24px 80px' }}
+      >
         {/* 3つの大きなボタン */}
         <div
+          className="top-action-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -569,9 +626,139 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
           </div>
         </div>
 
+        {/* 人気の特集セクション */}
+        <section className="top-feature-section" style={{ marginBottom: '64px' }}>
+          <div
+            className="top-section-header"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingBottom: '16px',
+              borderBottom: '1px dashed #94a3b8',
+              marginBottom: '24px',
+            }}
+          >
+            <h3
+              className="top-section-title top-section-title-ja"
+              style={{
+                margin: '0',
+                fontSize: '22px',
+                color: '#0f172a',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: '800',
+                letterSpacing: '1px',
+              }}
+            >
+              <span style={{ color: '#cbd5e1' }}>🔎</span> 人気の特集から探す
+            </h3>
+          </div>
+
+          <div
+            className="top-feature-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '16px',
+            }}
+          >
+            {featureCards.map((feature) => (
+              <button
+                key={feature.id || feature.path}
+                type="button"
+                className="top-feature-card"
+                onClick={() => navigate(feature.path)}
+                style={{
+                  backgroundColor: 'white',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '14px',
+                  padding: '22px 20px',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                  transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+                  fontFamily: 'inherit',
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-3px)';
+                  e.currentTarget.style.boxShadow = '0 10px 20px rgba(8, 74, 85, 0.12)';
+                  e.currentTarget.style.borderColor = colors.primary;
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
+                  e.currentTarget.style.borderColor = colors.border;
+                }}
+              >
+                {feature.thumbnailUrl ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      aspectRatio: '16 / 9',
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      backgroundColor: '#f1f5f9',
+                      marginBottom: '14px',
+                    }}
+                  >
+                    <img
+                      src={feature.thumbnailUrl}
+                      alt=""
+                      loading="lazy"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block',
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="top-feature-icon"
+                    style={{
+                      fontSize: '30px',
+                      lineHeight: 1,
+                      marginBottom: '14px',
+                    }}
+                  >
+                    {feature.icon}
+                  </div>
+                )}
+
+                <h4
+                  style={{
+                    margin: '0 0 10px',
+                    color: '#0f172a',
+                    fontSize: '16px',
+                    lineHeight: 1.5,
+                    fontWeight: '800',
+                  }}
+                >
+                  {feature.title}
+                </h4>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: colors.textSub,
+                    fontSize: '13px',
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {feature.description}
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+
         {/* 新着情報セクション */}
         <div style={{ marginBottom: '48px' }}>
           <div
+            className="top-section-header"
             style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -581,6 +768,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             }}
           >
             <h3
+              className="top-section-title"
               style={{
                 margin: 0,
                 fontSize: '22px',
@@ -596,6 +784,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             </h3>
 
             <button
+              className="top-section-action"
               onClick={() => navigate('/search')}
               style={{
                 backgroundColor: 'transparent',
@@ -621,7 +810,10 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '24px' }}>
+          <div
+            className="top-list"
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '24px' }}
+          >
             {!recentSubsidies || recentSubsidies.length === 0 ? (
               <p
                 style={{
@@ -643,6 +835,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
 
                 return (
                   <div
+                    className="top-list-item"
                     key={item.id || idx}
                     onClick={() => navigate(`/subsidy/${item.id}`)}
                     style={{
@@ -663,6 +856,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                     }}
                   >
                     <div
+                      className="top-list-date"
                       style={{
                         fontSize: '14px',
                         color: '#64748b',
@@ -673,8 +867,9 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                       {dateStr}
                     </div>
 
-                    <div style={{ flexShrink: 0 }}>
+                    <div className="top-list-badge-wrap" style={{ flexShrink: 0 }}>
                       <span
+                        className="top-list-badge"
                         style={{
                           backgroundColor: '#0f7b6c',
                           color: 'white',
@@ -688,8 +883,9 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                       </span>
                     </div>
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="top-list-text" style={{ flex: 1, minWidth: 0 }}>
                       <h4
+                        className="top-list-title"
                         style={{
                           margin: 0,
                           fontSize: '15px',
@@ -714,6 +910,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
         {/* 新着コラムセクション */}
         <div style={{ marginBottom: '48px' }}>
           <div
+            className="top-section-header"
             style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -723,6 +920,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             }}
           >
             <h3
+              className="top-section-title top-section-title-ja"
               style={{
                 margin: '0',
                 fontSize: '22px',
@@ -738,6 +936,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             </h3>
 
             <button
+              className="top-section-action"
               onClick={() => navigate('/columns')}
               style={{
                 backgroundColor: 'transparent',
@@ -764,7 +963,10 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '24px' }}>
+          <div
+            className="top-list"
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '24px' }}
+          >
             {!latestColumns || latestColumns.length === 0 ? (
               <p
                 style={{
@@ -788,6 +990,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
 
                 return (
                   <a
+                    className="top-list-item"
                     key={col.id || idx}
                     href={`/column/${col.slug}`}
                     onClick={(e) => {
@@ -813,6 +1016,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                     }}
                   >
                     <div
+                      className="top-list-date"
                       style={{
                         fontSize: '14px',
                         color: '#64748b',
@@ -823,8 +1027,9 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                       {dateStr}
                     </div>
 
-                    <div style={{ flexShrink: 0 }}>
+                    <div className="top-list-badge-wrap" style={{ flexShrink: 0 }}>
                       <span
+                        className="top-list-badge"
                         style={{
                           backgroundColor: tagColor,
                           color: 'white',
@@ -841,8 +1046,9 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
                       </span>
                     </div>
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="top-list-text" style={{ flex: 1, minWidth: 0 }}>
                       <h4
+                        className="top-list-title"
                         style={{
                           margin: 0,
                           fontSize: '15px',
@@ -865,6 +1071,7 @@ export default function TopPage({ recentSubsidies, latestColumns }) {
 
         {/* シミュレーター起動バナー */}
         <div
+          className="simulator-banner"
           onClick={() => navigate('/simulator')}
           style={{
             backgroundColor: '#197b6e',

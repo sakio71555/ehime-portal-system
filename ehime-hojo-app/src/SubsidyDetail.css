@@ -1,0 +1,236 @@
+.subsidy-detail-page,
+.subsidy-detail-page * {
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .subsidy-detail-page {
+    overflow-x: hidden;
+  }
+
+  .subsidy-detail-main {
+    padding-bottom: 44px !important;
+  }
+
+  .subsidy-detail-shell {
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 22px 16px 0 !important;
+  }
+
+  .subsidy-detail-back-wrap {
+    margin-bottom: 16px !important;
+  }
+
+  .subsidy-detail-back-button {
+    font-size: 13px !important;
+    padding: 8px 0 !important;
+  }
+
+  .subsidy-detail-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 14px !important;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
+    border: 1px solid #eef2f7 !important;
+  }
+
+  .subsidy-detail-card-inner {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 22px 18px !important;
+  }
+
+  .subsidy-detail-card-inner > *,
+  .subsidy-detail-section,
+  .subsidy-detail-info-section {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .subsidy-detail-meta-row {
+    gap: 9px !important;
+    margin-bottom: 14px !important;
+    align-items: flex-start !important;
+  }
+
+  .subsidy-detail-status {
+    padding: 6px 11px !important;
+    border-radius: 999px !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    flex-shrink: 0 !important;
+  }
+
+  .subsidy-detail-region {
+    min-width: 0 !important;
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .subsidy-detail-title {
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 20px !important;
+    line-height: 1.45 !important;
+    letter-spacing: 0 !important;
+    margin: 0 0 20px !important;
+    overflow-wrap: anywhere !important;
+    line-break: anywhere !important;
+    word-break: break-all !important;
+  }
+
+  .subsidy-detail-amount-card {
+    padding: 16px !important;
+    margin-bottom: 26px !important;
+    border-radius: 12px !important;
+  }
+
+  .subsidy-detail-amount-label {
+    font-size: 13px !important;
+    margin-bottom: 9px !important;
+  }
+
+  .subsidy-detail-amount-value {
+    font-size: 20px !important;
+    line-height: 1.55 !important;
+    overflow-wrap: anywhere !important;
+    line-break: anywhere !important;
+  }
+
+  .subsidy-detail-amount-sub {
+    font-size: 13px !important;
+    line-height: 1.75 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .subsidy-detail-section {
+    margin-bottom: 26px !important;
+  }
+
+  .subsidy-detail-section-title {
+    font-size: 18px !important;
+    line-height: 1.4 !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 13px !important;
+  }
+
+  .subsidy-detail-overview {
+    font-size: 14px !important;
+    line-height: 1.9 !important;
+    margin: 0 !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-all !important;
+  }
+
+  .subsidy-detail-info-grid {
+    gap: 18px !important;
+    margin-bottom: 30px !important;
+  }
+
+  .subsidy-detail-info-heading {
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+    margin: 0 0 8px !important;
+    align-items: flex-start !important;
+  }
+
+  .subsidy-detail-info-box,
+  .subsidy-detail-period-box {
+    padding: 14px !important;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+    line-height: 1.85 !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-all !important;
+  }
+
+  .subsidy-detail-tags-section {
+    margin-bottom: 28px !important;
+  }
+
+  .subsidy-detail-tags-heading {
+    font-size: 13px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .subsidy-detail-tags {
+    gap: 7px !important;
+  }
+
+  .subsidy-detail-tag {
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+    border-radius: 999px !important;
+  }
+
+  .subsidy-detail-official-wrap {
+    margin-bottom: 24px !important;
+  }
+
+  .subsidy-detail-official-link,
+  .subsidy-detail-official-empty {
+    display: block !important;
+    width: 100% !important;
+    padding: 13px 16px !important;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+  }
+
+  .subsidy-detail-disclaimer {
+    padding: 14px !important;
+    margin-bottom: 28px !important;
+    font-size: 12px !important;
+    line-height: 1.8 !important;
+    border-radius: 10px !important;
+  }
+
+  .subsidy-detail-consult-box {
+    padding: 18px !important;
+    border-radius: 12px !important;
+  }
+
+  .subsidy-detail-consult-title {
+    font-size: 17px !important;
+    line-height: 1.45 !important;
+    margin-bottom: 10px !important;
+  }
+
+  .subsidy-detail-consult-text {
+    font-size: 14px !important;
+    line-height: 1.8 !important;
+    margin-bottom: 16px !important;
+  }
+
+  .subsidy-detail-consult-actions {
+    display: block !important;
+  }
+
+  .subsidy-detail-consult-button {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 13px 16px !important;
+    font-size: 14px !important;
+    border-radius: 10px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .subsidy-detail-shell {
+    padding: 20px 12px 0 !important;
+  }
+
+  .subsidy-detail-card-inner {
+    padding: 20px 16px !important;
+  }
+
+  .subsidy-detail-title {
+    font-size: 19px !important;
+  }
+
+  .subsidy-detail-amount-value {
+    font-size: 19px !important;
+  }
+}

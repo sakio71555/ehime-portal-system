@@ -95,6 +95,7 @@ export default function SubsidyCard({ item }) {
 
   return (
     <div
+      className="portal-subsidy-card"
       onClick={handleCardClick}
       style={{
         backgroundColor: 'white',
@@ -124,6 +125,7 @@ export default function SubsidyCard({ item }) {
     >
       {/* 上部：正方形ステータス + タイトル上下中央 */}
       <div
+        className="portal-subsidy-card-header"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -132,6 +134,7 @@ export default function SubsidyCard({ item }) {
         }}
       >
         <div
+          className="portal-subsidy-status-box"
           style={{
             width: '92px',
             height: '92px',
@@ -155,6 +158,7 @@ export default function SubsidyCard({ item }) {
         </div>
 
         <div
+          className="portal-subsidy-title-wrap"
           style={{
             height: '92px',
             flex: 1,
@@ -164,6 +168,7 @@ export default function SubsidyCard({ item }) {
           }}
         >
           <h3
+            className="portal-subsidy-title"
             title={titleText}
             style={{
               margin: 0,
@@ -188,6 +193,7 @@ export default function SubsidyCard({ item }) {
       </div>
 
       <div
+        className="portal-subsidy-meta"
         style={{
           display: 'flex',
           gap: '16px',
@@ -196,16 +202,23 @@ export default function SubsidyCard({ item }) {
           flexWrap: 'wrap',
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <span
+          className="portal-subsidy-meta-item"
+          style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+        >
           📍 {regionText}
         </span>
 
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <span
+          className="portal-subsidy-meta-item"
+          style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+        >
           📅 申請期間: {periodText}
         </span>
       </div>
 
       <div
+        className="portal-subsidy-amount-box"
         style={{
           backgroundColor: '#f8fafc',
           padding: '16px',
@@ -217,6 +230,7 @@ export default function SubsidyCard({ item }) {
         }}
       >
         <div
+          className="portal-subsidy-amount-label"
           style={{
             fontSize: '13px',
             fontWeight: 'bold',
@@ -228,6 +242,7 @@ export default function SubsidyCard({ item }) {
         </div>
 
         <div
+          className="portal-subsidy-amount-value"
           style={{
             fontSize: '16px',
             fontWeight: 'bold',
@@ -244,6 +259,7 @@ export default function SubsidyCard({ item }) {
       </div>
 
       <p
+        className="portal-subsidy-summary"
         title={summaryText}
         style={{
           margin: 0,
@@ -260,6 +276,7 @@ export default function SubsidyCard({ item }) {
       </p>
 
       <div
+        className="portal-subsidy-tags"
         style={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -286,6 +303,7 @@ export default function SubsidyCard({ item }) {
       </div>
 
       <div
+        className="portal-subsidy-footer"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -297,6 +315,7 @@ export default function SubsidyCard({ item }) {
         }}
       >
         <span
+          className="portal-subsidy-detail-link"
           style={{
             color: '#0f7b6c',
             fontWeight: 'bold',
@@ -311,6 +330,7 @@ export default function SubsidyCard({ item }) {
         </span>
 
         <div
+          className="portal-subsidy-actions"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -318,6 +338,7 @@ export default function SubsidyCard({ item }) {
           }}
         >
           <span
+            className="portal-subsidy-note"
             style={{
               fontSize: '10px',
               color: '#9ca3af',
@@ -330,6 +351,7 @@ export default function SubsidyCard({ item }) {
           </span>
 
           <button
+            className="portal-subsidy-official-button"
             type="button"
             disabled={!officialUrl}
             onClick={(e) => {
