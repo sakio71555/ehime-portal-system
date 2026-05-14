@@ -17,6 +17,7 @@ const cheerio = require('cheerio');
 const pdfParseModule = require('pdf-parse');
 const {
   sanitizeSubsidyRow,
+  sanitizeAmountMaxYenWithReason,
   isNoisySubsidyCandidate,
 } = require('./shared/subsidySafety');
 const {
@@ -791,10 +792,12 @@ function isBadApplicationPeriod(value, parsedData = {}) {
   if (/^(申請期間|受付期間|募集期間|対象者|対象経費|補助率|上限金額)$/.test(text)) return true;
   if (text.length <= 8 && /期間|対象|概要|詳細/.test(text)) return true;
   if (
-    /補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童|対象となる支出|支出が対象|対象経費|申請方法|交付要綱|制度概要/.test(text)
+    /補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|掲載日|お知らせ|忘れない|児童手当|対象児童|対象となる支出|支出が対象|対象経費|対象期間|対象となる事業|対象事業期間|実施した事業を対象|以降に実施した事業を対象|事業期間|補助対象期間|補助対象事業|申請方法|交付要綱|制度概要/.test(text)
   ) {
     return true;
   }
+  if (/^\d{4}年\d{1,2}月\d{1,2}日(?:現在)?(?:更新|掲載)?$/.test(text)) return true;
+  if (/(更新|掲載)$/.test(text)) return true;
   if (/^受付終了$|^募集終了$|^終了しました$/.test(text)) return true;
   if (/補助金|助成金|支援事業/.test(text) && !/\d{4}|令和|平成|月|日|随時|終了/.test(text)) {
     return true;
@@ -816,6 +819,16 @@ function sanitizeApplicationPeriodText(value, parsedData = {}) {
     return '公式ページをご確認ください';
   }
   return String(value || '').trim();
+}
+
+function getApplicationPeriodSafety(value, parsedData = {}) {
+  const before = String(value || '').trim();
+  const after = sanitizeApplicationPeriodText(before, parsedData);
+  return {
+    before,
+    after,
+    reason: before !== after ? 'not_application_period_like' : '',
+  };
 }
 
 function japaneseEraFiscalYearToWestern(era, yearText) {
@@ -842,7 +855,23 @@ function extractFiscalYears(text = '') {
   return [...years].filter((year) => Number.isFinite(year));
 }
 
-function analyzeOldClosedFiscalYear(parsedData = {}, pageText = '') {
+function extractJapaneseEraDateYears(text = '') {
+  const value = String(text || '');
+  const years = new Set();
+
+  for (const match of value.matchAll(/(令和|平成)(元|\d{1,2})年\d{1,2}月\d{1,2}日/g)) {
+    const western = japaneseEraFiscalYearToWestern(match[1], match[2]);
+    if (western) years.add(western);
+  }
+
+  for (const match of value.matchAll(/(20\d{2})年\d{1,2}月\d{1,2}日/g)) {
+    years.add(Number(match[1]));
+  }
+
+  return [...years].filter((year) => Number.isFinite(year));
+}
+
+function analyzeEndedOrSuspendedProgram(parsedData = {}, pageText = '') {
   const title = String(parsedData.title || '');
   const applicationStatus = String(parsedData.application_status || '');
   const periodText = String(parsedData.application_period_text || '');
@@ -852,25 +881,48 @@ function analyzeOldClosedFiscalYear(parsedData = {}, pageText = '') {
   const focusedHaystack = `${title}\n${periodText}\n${fiscalYearText}\n${summary}\n${excerpt}`;
   const pageHaystack = `${focusedHaystack}\n${String(pageText || '').slice(0, 5000)}`;
   const fiscalYears = extractFiscalYears(focusedHaystack);
+  const dateYears = extractJapaneseEraDateYears(focusedHaystack);
   const currentFiscalYear = currentMonth >= 4 ? currentYear : currentYear - 1;
   const oldestFiscalYear = fiscalYears.length > 0 ? Math.min(...fiscalYears) : null;
   const hasOldFiscalYear = fiscalYears.some((year) => currentFiscalYear - year >= 2);
-  const isClosed =
-    /受付終了|募集終了|終了しました|終了いたしました|公募終了|申請受付を終了/.test(pageHaystack) ||
+  const hasOldDateYear = dateYears.some((year) => currentFiscalYear - year >= 2);
+  const hasClosed =
+    /受付終了|募集終了|申請受付を終了|終了しました|終了いたしました|公募終了|助成終了|補助終了|現在受付していません|現在募集していません|今年度の受付は終了|予算上限に達したため終了/.test(pageHaystack) ||
     /受付終了|募集終了|終了/.test(applicationStatus);
+  const hasSuspended =
+    /取扱いを休止|受付を休止|休止しています|休止中|取扱休止/.test(pageHaystack) ||
+    /休止/.test(applicationStatus);
   const hasCurrentSignal =
-    /現在募集中|随時募集|随時受付|受付中|募集中/.test(focusedHaystack) ||
+    /令和8年度募集|令和8年度.*受付|令和8年.*受付|現在募集中|随時募集|随時受付|受付中|募集中/.test(focusedHaystack) ||
     fiscalYears.some((year) => year >= currentFiscalYear);
-  const shouldSkip = Boolean(hasOldFiscalYear && isClosed && !hasCurrentSignal);
+  const hasEndedPeriod = /令和\d+年\d+月\d+日.*(?:助成終了|終了|まで)|20\d{2}年\d+月\d+日.*(?:助成終了|終了|まで)/.test(periodText);
+  const shouldSkip = Boolean(
+    !hasCurrentSignal &&
+      (
+        hasSuspended ||
+        hasClosed ||
+        (hasClosed && (hasOldFiscalYear || hasOldDateYear || hasEndedPeriod)) ||
+        (hasEndedPeriod && /終了|休止/.test(`${applicationStatus}\n${periodText}`))
+      )
+  );
+  const reason = hasSuspended
+    ? 'suspended_program'
+    : hasOldFiscalYear
+      ? 'old_closed_fiscal_year'
+      : hasClosed || hasEndedPeriod
+        ? 'ended_program'
+        : '';
 
   return {
     shouldSkip,
     fiscal_years: fiscalYears,
+    date_years: dateYears,
     current_fiscal_year: currentFiscalYear,
     oldest_fiscal_year: oldestFiscalYear,
-    is_closed: isClosed,
+    is_closed: hasClosed,
+    is_suspended: hasSuspended,
     has_current_signal: hasCurrentSignal,
-    reason: shouldSkip ? 'old_closed_fiscal_year' : '',
+    reason: shouldSkip ? reason : '',
   };
 }
 
@@ -933,6 +985,13 @@ function buildCandidateLog({
   sourceExternalId = '',
   normalizedOfficialUrl = '',
   oldFiscalYearCheck = null,
+  endedOrSuspendedCheck = null,
+  amountMaxYenBefore = null,
+  amountMaxYenAfter = null,
+  amountSafetyReason = '',
+  applicationPeriodBefore = '',
+  applicationPeriodAfter = '',
+  applicationPeriodSafetyReason = '',
 }) {
   return {
     seed_url: entry?.seed_url || '',
@@ -959,6 +1018,13 @@ function buildCandidateLog({
     source_external_id: sourceExternalId,
     normalized_official_url: normalizedOfficialUrl,
     old_fiscal_year_check: oldFiscalYearCheck,
+    ended_or_suspended_check: endedOrSuspendedCheck,
+    amount_max_yen_before: amountMaxYenBefore,
+    amount_max_yen_after: amountMaxYenAfter,
+    amount_safety_reason: amountSafetyReason,
+    application_period_before: applicationPeriodBefore,
+    application_period_after: applicationPeriodAfter,
+    application_period_safety_reason: applicationPeriodSafetyReason,
     is_jgrants_url: isJgrantsUrl(entry?.url || ''),
   };
 }
@@ -1431,9 +1497,10 @@ async function runUltimateAutoPilot() {
         continue;
       }
 
-      const oldFiscalYearCheck = analyzeOldClosedFiscalYear(parsedData, rawText);
-      if (oldFiscalYearCheck.shouldSkip) {
-        console.log(`  ⏭️ 古い年度の受付終了ページのため保存しません`);
+      const endedOrSuspendedCheck = analyzeEndedOrSuspendedProgram(parsedData, rawText);
+      const oldFiscalYearCheck = endedOrSuspendedCheck;
+      if (endedOrSuspendedCheck.shouldSkip) {
+        console.log(`  ⏭️ 終了・休止ページのため保存しません: ${endedOrSuspendedCheck.reason}`);
         candidateLogs.push(
           buildCandidateLog({
             entry,
@@ -1441,8 +1508,9 @@ async function runUltimateAutoPilot() {
             title: parsedData.title || title,
             score,
             action: 'skip',
-            skippedReason: oldFiscalYearCheck.reason,
+            skippedReason: endedOrSuspendedCheck.reason,
             oldFiscalYearCheck,
+            endedOrSuspendedCheck,
           })
         );
         stats.reject++;
@@ -1451,17 +1519,41 @@ async function runUltimateAutoPilot() {
         continue;
       }
 
-      const sanitizedApplicationPeriodText = sanitizeApplicationPeriodText(
+      const applicationPeriodSafety = getApplicationPeriodSafety(
         parsedData.application_period_text,
         parsedData
       );
-      if (sanitizedApplicationPeriodText !== parsedData.application_period_text) {
-        console.log(`  🧹 申請期間を安全化: ${sanitizedApplicationPeriodText}`);
+      if (applicationPeriodSafety.after !== parsedData.application_period_text) {
+        console.log(`  🧹 申請期間を安全化: ${applicationPeriodSafety.after}`);
         parsedData = {
           ...parsedData,
-          application_period_text: sanitizedApplicationPeriodText,
+          application_period_text: applicationPeriodSafety.after,
         };
       }
+
+      const amountSafety = sanitizeAmountMaxYenWithReason(
+        parsedData.amount_max_yen,
+        parsedData.amount_text
+      );
+      if (amountSafety.reason && amountSafety.before !== amountSafety.after) {
+        console.log(
+          `  🧹 金額上限を安全化: ${amountSafety.before ?? 'null'} -> ${amountSafety.after ?? 'null'} (${amountSafety.reason})`
+        );
+        parsedData = {
+          ...parsedData,
+          amount_max_yen: amountSafety.after,
+        };
+      }
+
+      const logSafetyMeta = {
+        endedOrSuspendedCheck,
+        amountMaxYenBefore: amountSafety.before,
+        amountMaxYenAfter: amountSafety.after,
+        amountSafetyReason: amountSafety.reason,
+        applicationPeriodBefore: applicationPeriodSafety.before,
+        applicationPeriodAfter: applicationPeriodSafety.after,
+        applicationPeriodSafetyReason: applicationPeriodSafety.reason,
+      };
 
       const officialDecision = decideOfficialUrl({
         pageType,
@@ -1491,6 +1583,7 @@ async function runUltimateAutoPilot() {
             sourceExternalId: sourceIdentity.sourceExternalId,
             normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
             oldFiscalYearCheck,
+            ...logSafetyMeta,
           })
         );
         stats.reject++;
@@ -1524,6 +1617,7 @@ async function runUltimateAutoPilot() {
               sourceExternalId: sourceIdentity.sourceExternalId,
               normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
               oldFiscalYearCheck,
+              ...logSafetyMeta,
             })
           );
           stats.reject++;
@@ -1558,6 +1652,7 @@ async function runUltimateAutoPilot() {
             sourceExternalId: sourceIdentity.sourceExternalId,
             normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
             oldFiscalYearCheck,
+            ...logSafetyMeta,
           })
         );
         stats.reject++;
@@ -1593,6 +1688,7 @@ async function runUltimateAutoPilot() {
             sourceExternalId: sourceIdentity.sourceExternalId,
             normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
             oldFiscalYearCheck,
+            ...logSafetyMeta,
           })
         );
         stats.reject++;
@@ -1642,6 +1738,7 @@ async function runUltimateAutoPilot() {
           sourceExternalId: sourceIdentity.sourceExternalId,
           normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
           oldFiscalYearCheck,
+          ...logSafetyMeta,
         })
       );
 

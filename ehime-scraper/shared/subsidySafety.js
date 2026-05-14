@@ -11,6 +11,81 @@ function normalizeAmountMaxYen(value) {
   return Math.trunc(amount);
 }
 
+function parseNumber(value) {
+  const normalized = String(value || '').replace(/,/g, '');
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function extractAmountCandidatesFromText(text = '') {
+  const value = String(text || '');
+  const amounts = [];
+
+  for (const match of value.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*万\s*(\d[\d,]*)\s*千\s*円?/g)) {
+    const man = parseNumber(match[1]);
+    const sen = parseNumber(match[2]);
+    if (man !== null && sen !== null) amounts.push(man * 10000 + sen * 1000);
+  }
+
+  for (const match of value.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*万円/g)) {
+    const amount = parseNumber(match[1]);
+    if (amount !== null) amounts.push(amount * 10000);
+  }
+
+  for (const match of value.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*千円/g)) {
+    const amount = parseNumber(match[1]);
+    if (amount !== null) amounts.push(amount * 1000);
+  }
+
+  for (const match of value.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*円/g)) {
+    const amount = parseNumber(match[1]);
+    if (amount !== null) amounts.push(amount);
+  }
+
+  return amounts
+    .map((amount) => normalizeAmountMaxYen(amount))
+    .filter((amount) => amount !== null);
+}
+
+function hasVoucherOrUnitAmountSignal(text = '') {
+  return /円券|助成券|利用券|タクシー券|商品券|交通券|回数券|券面額|(?:\d+|[一二三四五六七八九十]+)枚|1枚|一枚|1回|一回|1日|一日|月額|年額|交通費|運賃/.test(
+    String(text || '')
+  );
+}
+
+function sanitizeAmountMaxYenWithReason(value, amountText = '') {
+  const before = normalizeAmountMaxYen(value);
+  const text = String(amountText || '').trim();
+
+  if (hasVoucherOrUnitAmountSignal(text)) {
+    return {
+      amount_max_yen: null,
+      before,
+      after: null,
+      reason: 'voucher_or_unit_amount',
+    };
+  }
+
+  const candidates = extractAmountCandidatesFromText(text);
+  const extractedMax = candidates.length > 0 ? Math.max(...candidates) : null;
+
+  if (extractedMax !== null && extractedMax !== before) {
+    return {
+      amount_max_yen: extractedMax,
+      before,
+      after: extractedMax,
+      reason: before === null ? 'parsed_from_amount_text' : 'corrected_from_amount_text',
+    };
+  }
+
+  return {
+    amount_max_yen: before,
+    before,
+    after: before,
+    reason: before === null && value ? 'invalid_amount_to_null' : '',
+  };
+}
+
 function sanitizeSubsidyRow(row = {}) {
   return {
     ...row,
@@ -67,6 +142,7 @@ function isNoisySubsidyCandidate(candidate = {}) {
 module.exports = {
   POSTGRES_INT4_MAX,
   normalizeAmountMaxYen,
+  sanitizeAmountMaxYenWithReason,
   sanitizeSubsidyRow,
   isNoisySubsidyCandidate,
 };
