@@ -11,9 +11,11 @@ console.warn = (...args) => {
 const { OpenAI } = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const cheerio = require('cheerio');
-const pdfParse = require('pdf-parse');
-// 🔥 UPDATE: PDFを画像に変換するためのライブラリを追加
-const pdf2img = require('pdf-img-convert'); 
+const pdfParseModule = require('pdf-parse');
+const {
+  sanitizeSubsidyRow,
+  isNoisySubsidyCandidate,
+} = require('./shared/subsidySafety');
 
 const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, TAVILY_API_KEY } = process.env;
 
@@ -24,6 +26,20 @@ if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_KEY || !TAVILY_API_KEY
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const toPositiveInt = (value, fallback = 0) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+};
+const CONFIG = {
+  dryRun: process.env.SCRAPER_DRY_RUN === '1',
+  maxUrls: toPositiveInt(process.env.SCRAPER_MAX_URLS, 0),
+  maxInserts: toPositiveInt(process.env.SCRAPER_MAX_INSERTS, 0),
+  prefilterRegisteredUrls: process.env.SCRAPER_PREFILTER_SOURCE_URL !== '0',
+  seedUrls: String(process.env.SCRAPER_URLS || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean),
+};
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
@@ -243,15 +259,15 @@ async function fetchPageTextDynamic(url) {
       const buffer = Buffer.from(arrayBuffer);
       
       // 1. まずは通常の pdf-parse で高速テキスト抽出
-      const pdfData = await pdfParse(buffer);
-      let cleanText = pdfData.text.replace(/\n\s*\n/g, '\n').trim();
+      let cleanText = await parsePdfText(buffer);
+      cleanText = cleanText.replace(/\n\s*\n/g, '\n').trim();
       
       // 2. 🔥 OCRフォールバック: テキストが300文字未満なら「スキャン画像」と判定してOCR実行
       if (cleanText.length < 300) {
         console.log(`  ⚠️ スキャン画像PDFの可能性 (抽出文字数: ${cleanText.length}文字)。OCRフォールバックを実行します...`);
         
         // PDFを画像(Base64)に変換
-        const pdfImages = await pdf2img.convert(buffer, { base64: true });
+        const pdfImages = await convertPdfToImages(buffer);
         const targetImages = pdfImages.slice(0, 5); // 膨大なコストと時間を防ぐため先頭5ページに限定
         
         console.log(`  👁️ Vision AI (gpt-4o-mini) で ${targetImages.length} ページ分の画像を直接読み取ります...`);
@@ -330,6 +346,39 @@ async function fetchPageTextDynamic(url) {
   return { text: `${metaDataText}\n\n${cleanText}`, extractedOfficialUrl, isPdf: false, fetchedUrl };
 }
 
+async function convertPdfToImages(buffer) {
+  try {
+    const pdf2img = require('pdf-img-convert');
+    return pdf2img.convert(buffer, { base64: true });
+  } catch (err) {
+    throw new Error(
+      `OCR用PDF画像変換ライブラリの読み込みに失敗しました: ${err.message}`
+    );
+  }
+}
+
+async function parsePdfText(buffer) {
+  if (typeof pdfParseModule === 'function') {
+    const pdfData = await pdfParseModule(buffer);
+    return pdfData?.text || '';
+  }
+
+  const { PDFParse } = pdfParseModule;
+
+  if (!PDFParse) {
+    throw new Error('pdf-parse の PDFParse export が見つかりません');
+  }
+
+  const parser = new PDFParse({ data: buffer });
+
+  try {
+    const result = await parser.getText();
+    return result?.text || '';
+  } finally {
+    await parser.destroy();
+  }
+}
+
 async function extractFullWithAI(text, sourceUrl) {
   const systemPrompt = `本日は【${todayStr}】です。提供された記事（またはPDF抽出テキスト）から、愛媛県内で活用可能な補助金・助成金・給付金・支援制度を抽出し、指定されたJSON構造で返してください。
 
@@ -406,118 +455,151 @@ async function runUltimateAutoPilot() {
   console.log(`\n👑 愛媛補助金クローラー [究極UI・PDF OCR完全統合版] 起動...\n`);
   const targetUrls = new Set();
   const pdfQueue = new Set(); 
-  const stats = { publish: 0, reject: 0, errors: 0, parsed_pdf: 0 }; 
+  const stats = { publish: 0, wouldPublish: 0, reject: 0, noise: 0, errors: 0, parsed_pdf: 0 }; 
+
+  console.log(
+    `設定: DRY_RUN=${CONFIG.dryRun ? 'ON' : 'OFF'} / MAX_URLS=${CONFIG.maxUrls || 'なし'} / MAX_INSERTS=${CONFIG.maxInserts || 'なし'} / URL事前重複チェック=${CONFIG.prefilterRegisteredUrls ? 'ON' : 'OFF'}`
+  );
+
+  if (CONFIG.seedUrls.length > 0) {
+    CONFIG.seedUrls.forEach((url) => targetUrls.add(normalizeUrl(url)));
+    console.log(`📌 SCRAPER_URLS指定のため探索を省略します: ${targetUrls.size} 件`);
+  } else {
   
-  console.log('📡 [フェーズ0] シードURLから子リンクを展開します...');
-  for (const strategy of EHIME_STRATEGIES) {
-    const seeds = SEED_URLS[strategy.name] || [];
-    for (const seed of seeds) {
-      targetUrls.add(normalizeUrl(seed));
-      const childLinks = await collectLinksFromHub(seed, strategy.domain);
-      childLinks.forEach(link => targetUrls.add(link));
-      await sleep(1000);
-    }
-  }
-  console.log(`  ➔ 初期URL総数: ${targetUrls.size} 件`);
-
-  console.log('\n📡 [フェーズ1] J-Net21のデータベースを徹底検索します...');
-  for (const area of EHIME_AREAS) {
-    let queries = [];
-    if (area === '全国') {
-      queries = [
-        `site:j-net21.smrj.go.jp/snavi2/articles/ "地域" "全国" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-        `site:j-net21.smrj.go.jp/snavi2/articles/ ("【全国】" OR "〖全国〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-      ];
-    } else {
-      queries = [
-        `site:j-net21.smrj.go.jp/snavi2/articles/ "${area}" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-        `site:j-net21.smrj.go.jp/snavi2/articles/ ("実施機関" "${area}" OR "〖${area}〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-      ];
-    }
-
-    for (let i = 0; i < queries.length; i++) {
-      try {
-        const res = await fetch('https://api.tavily.com/search', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: TAVILY_API_KEY, query: queries[i], search_depth: "basic", max_results: (area === '全国' ? 20 : 10) }) 
-        });
-        
-        if (!res.ok) { 
-          if (res.status === 429 || res.status >= 500) {
-            console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
-            await sleep(10000); 
-            i--; 
-            continue; 
-          } else {
-            console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
-            break;
-          }
-        }
-
-        const data = await res.json();
-        if (data.results) {
-          data.results.forEach(r => {
-            const nUrl = normalizeUrl(r.url);
-            if (nUrl.match(/\/articles\/\d+/) && !targetUrls.has(nUrl)) targetUrls.add(nUrl);
-          });
-        }
-      } catch (e) {
-        console.log(`    ⚠️ Tavily検索例外 (フェーズ1): ${e.message}`);
+    console.log('📡 [フェーズ0] シードURLから子リンクを展開します...');
+    for (const strategy of EHIME_STRATEGIES) {
+      const seeds = SEED_URLS[strategy.name] || [];
+      for (const seed of seeds) {
+        targetUrls.add(normalizeUrl(seed));
+        const childLinks = await collectLinksFromHub(seed, strategy.domain);
+        childLinks.forEach(link => targetUrls.add(link));
+        await sleep(1000);
       }
-      await sleep(2500); 
     }
-  }
+    console.log(`  ➔ 初期URL総数: ${targetUrls.size} 件`);
 
-  console.log('\n📡 [フェーズ2] 秘伝の書に基づく各自治体の公式HP直撃検索を開始します...');
-  for (const strategy of EHIME_STRATEGIES) {
-    const localQueries = [
-      `site:${strategy.domain} ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-      `site:${strategy.domain} (${strategy.keywords}) ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-    ];
+    console.log('\n📡 [フェーズ1] J-Net21のデータベースを徹底検索します...');
+    for (const area of EHIME_AREAS) {
+      let queries = [];
+      if (area === '全国') {
+        queries = [
+          `site:j-net21.smrj.go.jp/snavi2/articles/ "地域" "全国" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
+          `site:j-net21.smrj.go.jp/snavi2/articles/ ("【全国】" OR "〖全国〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
+        ];
+      } else {
+        queries = [
+          `site:j-net21.smrj.go.jp/snavi2/articles/ "${area}" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
+          `site:j-net21.smrj.go.jp/snavi2/articles/ ("実施機関" "${area}" OR "〖${area}〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
+        ];
+      }
 
-    for (let i = 0; i < localQueries.length; i++) {
-      try {
-        const res = await fetch('https://api.tavily.com/search', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: TAVILY_API_KEY, query: localQueries[i], search_depth: "advanced", max_results: 15 }) 
-        });
+      for (let i = 0; i < queries.length; i++) {
+        try {
+          const res = await fetch('https://api.tavily.com/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: TAVILY_API_KEY, query: queries[i], search_depth: "basic", max_results: (area === '全国' ? 20 : 10) }) 
+          });
         
-        if (!res.ok) { 
-          if (res.status === 429 || res.status >= 500) {
-            console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
-            await sleep(10000); 
-            i--; 
-            continue; 
-          } else {
-            console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
-            break;
-          }
-        }
-
-        const data = await res.json();
-        if (data.results) {
-          data.results.forEach(r => {
-            const nUrl = normalizeUrl(r.url);
-            const hint = `${r.title || ''} ${r.content || ''}`;
-            if (shouldKeepUrl(nUrl, strategy.domain) && looksLikeSubsidyLink(hint, nUrl) && !targetUrls.has(nUrl)) {
-              targetUrls.add(nUrl);
+          if (!res.ok) { 
+            if (res.status === 429 || res.status >= 500) {
+              console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
+              await sleep(10000); 
+              i--; 
+              continue; 
+            } else {
+              console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
+              break;
             }
-          });
+          }
+
+          const data = await res.json();
+          if (data.results) {
+            data.results.forEach(r => {
+              const nUrl = normalizeUrl(r.url);
+              if (nUrl.match(/\/articles\/\d+/) && !targetUrls.has(nUrl)) targetUrls.add(nUrl);
+            });
+          }
+        } catch (e) {
+          console.log(`    ⚠️ Tavily検索例外 (フェーズ1): ${e.message}`);
         }
-      } catch (e) {
-        console.log(`    ⚠️ Tavily検索例外 (フェーズ2): ${e.message}`);
+        await sleep(2500); 
       }
-      await sleep(3000); 
+    }
+
+    console.log('\n📡 [フェーズ2] 秘伝の書に基づく各自治体の公式HP直撃検索を開始します...');
+    for (const strategy of EHIME_STRATEGIES) {
+      const localQueries = [
+        `site:${strategy.domain} ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
+        `site:${strategy.domain} (${strategy.keywords}) ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
+      ];
+
+      for (let i = 0; i < localQueries.length; i++) {
+        try {
+          const res = await fetch('https://api.tavily.com/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: TAVILY_API_KEY, query: localQueries[i], search_depth: "advanced", max_results: 15 }) 
+          });
+        
+          if (!res.ok) { 
+            if (res.status === 429 || res.status >= 500) {
+              console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
+              await sleep(10000); 
+              i--; 
+              continue; 
+            } else {
+              console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
+              break;
+            }
+          }
+
+          const data = await res.json();
+          if (data.results) {
+            data.results.forEach(r => {
+              const nUrl = normalizeUrl(r.url);
+              const hint = `${r.title || ''} ${r.content || ''}`;
+              if (shouldKeepUrl(nUrl, strategy.domain) && looksLikeSubsidyLink(hint, nUrl) && !targetUrls.has(nUrl)) {
+                targetUrls.add(nUrl);
+              }
+            });
+          }
+        } catch (e) {
+          console.log(`    ⚠️ Tavily検索例外 (フェーズ2): ${e.message}`);
+        }
+        await sleep(3000); 
+      }
     }
   }
 
-  const finalUrls = Array.from(targetUrls);
+  const finalUrls = Array.from(targetUrls).slice(0, CONFIG.maxUrls || undefined);
   console.log(`\n🤖 解析対象: 合計 ${finalUrls.length} 件のURLを処理します...\n`);
 
   for (const url of finalUrls) {
+    if (CONFIG.maxInserts && (stats.publish + stats.wouldPublish) >= CONFIG.maxInserts) {
+      console.log(`🛑 SCRAPER_MAX_INSERTS=${CONFIG.maxInserts} に達したため終了します。`);
+      break;
+    }
+
     console.log(`▶ 処理中: ${url}`);
     
     try {
+      const normalizedCandidateUrl = normalizeUrl(url);
+
+      if (CONFIG.prefilterRegisteredUrls) {
+        const { data: registeredRows, error: registeredErr } = await supabase
+          .from('subsidies')
+          .select('id')
+          .eq('source_url', normalizedCandidateUrl)
+          .limit(1);
+
+        if (registeredErr) throw new Error(`source_url事前確認エラー: ${registeredErr.message}`);
+
+        if (registeredRows && registeredRows.length > 0) {
+          console.log(`  ⏭️ URL登録済みスキップ`);
+          stats.reject++;
+          continue;
+        }
+      }
+
       const { text: rawText, extractedOfficialUrl, isPdf, fetchedUrl } = await fetchPageTextDynamic(url);
       const canonicalUrl = fetchedUrl || normalizeUrl(url);
 
@@ -565,6 +647,17 @@ async function runUltimateAutoPilot() {
         continue; 
       }
 
+      const noiseReason = isNoisySubsidyCandidate({
+        ...parsedData,
+        sourceUrl: canonicalUrl,
+      });
+
+      if (noiseReason) {
+        console.log(`  ⏭️ ノイズ除外: ${noiseReason}`);
+        stats.noise++;
+        continue;
+      }
+
       const dedupeKey = makeSubsidyKey(parsedData);
       
       const { data: existingByKeyRows, error: dedupeErr } = await supabase
@@ -604,14 +697,22 @@ async function runUltimateAutoPilot() {
         application_end_date: normalizeDate(dbData.application_end_date),
       };
       
-      const { error: pErr } = await supabase.from('subsidies').insert([{ 
+      const insertRow = sanitizeSubsidyRow({ 
         ...normalizedDbData, 
         official_url: safeOfficialUrl, 
         dedupe_key: dedupeKey,
         crawl_status: 'draft', 
         is_active: false, 
         source_url: canonicalUrl 
-      }]);
+      });
+
+      if (CONFIG.dryRun) {
+        console.log('  🧪 DRY_RUNのため保存しません');
+        stats.wouldPublish++;
+        continue;
+      }
+
+      const { error: pErr } = await supabase.from('subsidies').insert([insertRow]);
 
       if (pErr) { 
         console.log(`  ❌ 保存エラー: ${pErr.message}`); 
@@ -633,7 +734,7 @@ async function runUltimateAutoPilot() {
   }
 
   console.log(`\n🏆 究極クローラー完了！`);
-  console.log(`✅ 追加: ${stats.publish}件 | ⏭️ スキップ: ${stats.reject}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件`);
+  console.log(`✅ 追加: ${stats.publish}件 | 🧪 保存候補(DRY_RUN): ${stats.wouldPublish}件 | ⏭️ スキップ: ${stats.reject}件 | 🧹 ノイズ除外: ${stats.noise}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件`);
 }
 
 runUltimateAutoPilot();

@@ -18,9 +18,10 @@ export default function Footer() {
   return (
     <footer
       style={{
-        backgroundColor: '#2d3b33',
+        backgroundColor: '#303030',
+        borderTop: '14px solid #f0df00',
         color: 'white',
-        padding: '60px 40px 20px',
+        padding: '56px 40px 20px',
         marginTop: 'auto',
       }}
     >
@@ -30,7 +31,7 @@ export default function Footer() {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-start',
-            borderBottom: '1px solid rgba(255,255,255,0.1)',
+            borderBottom: '1px solid rgba(255,255,255,0.14)',
             paddingBottom: '40px',
             marginBottom: '20px',
             flexWrap: 'wrap',
@@ -58,7 +59,7 @@ export default function Footer() {
             <div
               style={{
                 fontSize: '13px',
-                color: '#cbd5e1',
+                color: 'rgba(255, 255, 255, 0.86)',
                 lineHeight: '1.6',
               }}
             >
@@ -74,7 +75,7 @@ export default function Footer() {
               display: 'flex',
               gap: '24px',
               fontSize: '14px',
-              color: '#cbd5e1',
+              color: 'rgba(255, 255, 255, 0.9)',
               flexWrap: 'wrap',
             }}
           >
@@ -85,7 +86,7 @@ export default function Footer() {
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#cbd5e1';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
               }}
             >
               トップ
@@ -98,7 +99,7 @@ export default function Footer() {
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#cbd5e1';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
               }}
             >
               補助金を探す
@@ -111,7 +112,7 @@ export default function Footer() {
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#cbd5e1';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
               }}
             >
               専門家を探す
@@ -124,7 +125,7 @@ export default function Footer() {
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#cbd5e1';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
               }}
             >
               お役立ちコラム
@@ -137,7 +138,7 @@ export default function Footer() {
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#cbd5e1';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
               }}
             >
               はじめての方へ
@@ -150,7 +151,7 @@ export default function Footer() {
           style={{
             textAlign: 'center',
             fontSize: '12px',
-            color: '#9ca3af',
+            color: 'rgba(255, 255, 255, 0.72)',
             lineHeight: '1.8',
           }}
         >

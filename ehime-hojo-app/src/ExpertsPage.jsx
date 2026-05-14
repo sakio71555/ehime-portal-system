@@ -16,7 +16,7 @@ export default function ExpertsPage() {
       try {
         const { data, error } = await supabase.from('experts').select('*').order('created_at', { ascending: false });
         if (error) throw error;
-        setExperts(data || []);
+        setExperts((data || []).filter((expert) => expert.is_active !== false));
       } catch (err) {
         console.error('専門家データの取得エラー:', err.message);
       } finally {

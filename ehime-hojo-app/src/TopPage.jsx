@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const colors = {
-  primary: '#526b5d',
-  primaryLight: '#f4f6f5',
+  primary: '#19aeb8',
+  primaryLight: '#e8fbfc',
   textMain: '#4b5550',
   textSub: '#8b9690',
   border: '#e4e7e5',
@@ -12,9 +12,9 @@ const colors = {
 };
 
 const BANNERS = [
-  '/banner1.jpg',
-  '/banner2.jpg',
-  '/banner3.jpg',
+  '/banner4.png',
+  '/banner5.png',
+  '/banner6.png',
 ];
 
 const FALLBACK_FEATURE_CARDS = [
@@ -51,30 +51,6 @@ const getFeatureCardIcon = (feature) => {
   return '⭐';
 };
 
-const getCarouselSlideWidth = () => {
-  if (typeof window === 'undefined') return 1100;
-
-  const width = window.innerWidth;
-
-  if (width < 480) return Math.max(width - 28, 300);
-  if (width < 768) return Math.max(width - 44, 420);
-  if (width < 1024) return Math.max(width - 96, 680);
-  if (width < 1440) return Math.round(width * 0.72);
-
-  return Math.min(1320, Math.round(width * 0.68));
-};
-
-const getCarouselGap = () => {
-  if (typeof window === 'undefined') return 48;
-
-  const width = window.innerWidth;
-
-  if (width < 640) return 16;
-  if (width < 1024) return 24;
-
-  return 64;
-};
-
 // カテゴリ名に応じて自動で色を振り分ける関数
 const getCategoryColor = (category) => {
   if (!category) return '#3b82f6';
@@ -83,39 +59,16 @@ const getCategoryColor = (category) => {
   if (category.includes('IT') || category.includes('デジタル')) return '#0ea5e9';
   if (category.includes('設備') || category.includes('投資')) return '#8b5cf6';
   if (category.includes('販路') || category.includes('売上')) return '#f43f5e';
-  if (category.includes('創業') || category.includes('起業')) return '#14b8a6';
+  if (category.includes('新規事業') || category.includes('第二創業')) return '#64748b';
+  if (category.includes('創業') || category.includes('起業')) return '#4f766f';
   if (category.includes('承継') || category.includes('人材')) return '#64748b';
 
-  return '#3b82f6';
+  return '#64748b';
 };
 
 export default function TopPage({ recentSubsidies, latestColumns, featureColumns }) {
   const navigate = useNavigate();
-
-  /**
-   * 無限ループ用：
-   * 実体は [最後の画像, 1枚目, 2枚目, 3枚目, 1枚目] にする。
-   * 最初の表示位置は index=1。
-   */
-  const loopBanners = useMemo(() => {
-    if (BANNERS.length <= 1) return BANNERS;
-
-    return [
-      BANNERS[BANNERS.length - 1],
-      ...BANNERS,
-      BANNERS[0],
-    ];
-  }, []);
-
-  const [slideIndex, setSlideIndex] = useState(1);
-  const [transitionEnabled, setTransitionEnabled] = useState(true);
-  const [slideWidth, setSlideWidth] = useState(getCarouselSlideWidth);
-  const [slideGap, setSlideGap] = useState(getCarouselGap);
-
-  const realSlideIndex = useMemo(() => {
-    if (BANNERS.length === 0) return 0;
-    return ((slideIndex - 1) % BANNERS.length + BANNERS.length) % BANNERS.length;
-  }, [slideIndex]);
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
 
   const featureCards = useMemo(() => {
     if (featureColumns?.length > 0) {
@@ -135,294 +88,152 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
     return FALLBACK_FEATURE_CARDS;
   }, [featureColumns]);
 
-  const slideHeight = Math.round(slideWidth * 0.375);
-  const trackTranslate = `calc(50vw - ${slideWidth / 2}px - ${
-    slideIndex * (slideWidth + slideGap)
-  }px)`;
-
-  useEffect(() => {
-    const handleResize = () => {
-      setSlideWidth(getCarouselSlideWidth());
-      setSlideGap(getCarouselGap());
-    };
-
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
   useEffect(() => {
     if (BANNERS.length <= 1) return undefined;
 
     const timer = setInterval(() => {
-      setTransitionEnabled(true);
-      setSlideIndex((prev) => prev + 1);
-    }, 5000);
+      setCurrentBannerIndex((prev) => (prev + 1) % BANNERS.length);
+    }, 5200);
 
     return () => clearInterval(timer);
   }, []);
 
-  const nextSlide = () => {
-    if (BANNERS.length <= 1) return;
-
-    setTransitionEnabled(true);
-    setSlideIndex((prev) => prev + 1);
+  const goToPrevBanner = () => {
+    setCurrentBannerIndex((prev) => (prev - 1 + BANNERS.length) % BANNERS.length);
   };
 
-  const prevSlide = () => {
-    if (BANNERS.length <= 1) return;
-
-    setTransitionEnabled(true);
-    setSlideIndex((prev) => prev - 1);
-  };
-
-  const goToSlide = (index) => {
-    setTransitionEnabled(true);
-    setSlideIndex(index + 1);
-  };
-
-  const handleTransitionEnd = () => {
-    if (BANNERS.length <= 1) return;
-
-    // 左端の複製スライドまで行ったら、本物の3枚目へ瞬間移動
-    if (slideIndex === 0) {
-      setTransitionEnabled(false);
-      setSlideIndex(BANNERS.length);
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTransitionEnabled(true);
-        });
-      });
-
-      return;
-    }
-
-    // 右端の複製スライドまで行ったら、本物の1枚目へ瞬間移動
-    if (slideIndex === BANNERS.length + 1) {
-      setTransitionEnabled(false);
-      setSlideIndex(1);
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTransitionEnabled(true);
-        });
-      });
-    }
+  const goToNextBanner = () => {
+    setCurrentBannerIndex((prev) => (prev + 1) % BANNERS.length);
   };
 
   return (
     <>
-      {/* カルーセル：画像を切らずに、左右チラ見せ＋3枚無限ループ */}
+      {/* ファーストビュー：ブランド感を出すターコイズ帯＋中央バナー */}
       <section
-        className="top-hero-carousel"
+        className="top-visual-hero"
         style={{
           position: 'relative',
           width: '100vw',
           marginLeft: 'calc(50% - 50vw)',
           marginRight: 'calc(50% - 50vw)',
-          backgroundColor: '#f7f9f8',
-          borderTop: '1px solid #e7ece9',
-          borderBottom: '1px solid #e7ece9',
-          padding: '40px 0 74px',
+          backgroundColor: '#ffffff',
+          padding: '0 0 74px',
           marginBottom: '64px',
           overflow: 'hidden',
         }}
       >
         <div
+          className="top-visual-band"
+          aria-hidden="true"
           style={{
-            width: '100%',
-            overflow: 'hidden',
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '100vw',
+            height: 'clamp(112px, 15vw, 206px)',
+            backgroundColor: '#19aeb8',
+          }}
+        />
+        <div
+          className="top-visual-banner-frame"
+          style={{
             position: 'relative',
+            zIndex: 1,
+            width: 'min(84vw, 1480px)',
+            aspectRatio: '2048 / 768',
+            margin: '42px auto 0',
+            backgroundColor: '#ffffff',
+            borderRadius: '18px',
+            overflow: 'hidden',
           }}
         >
           <div
-            onTransitionEnd={handleTransitionEnd}
+            className="top-visual-carousel-track"
             style={{
               display: 'flex',
-              gap: `${slideGap}px`,
-              width: 'max-content',
-              transform: `translateX(${trackTranslate})`,
-              transition: transitionEnabled
-                ? 'transform 0.65s cubic-bezier(0.25, 0.8, 0.25, 1)'
-                : 'none',
-              alignItems: 'center',
+              width: `${BANNERS.length * 100}%`,
+              height: '100%',
+              transform: `translateX(-${currentBannerIndex * (100 / BANNERS.length)}%)`,
+              transition: 'transform 0.78s cubic-bezier(0.22, 1, 0.36, 1)',
               willChange: 'transform',
             }}
           >
-            {loopBanners.map((img, idx) => {
-              const isActive = idx === slideIndex;
-
-              return (
-                <button
-                  key={`${img}-${idx}`}
-                  type="button"
-                  onClick={() => {
-                    if (idx === 0) {
-                      setTransitionEnabled(true);
-                      setSlideIndex(0);
-                      return;
-                    }
-
-                    if (idx === loopBanners.length - 1) {
-                      setTransitionEnabled(true);
-                      setSlideIndex(loopBanners.length - 1);
-                      return;
-                    }
-
-                    setTransitionEnabled(true);
-                    setSlideIndex(idx);
-                  }}
+            {BANNERS.map((banner, index) => (
+              <div
+                key={banner}
+                className="top-visual-slide"
+                style={{
+                  width: `${100 / BANNERS.length}%`,
+                  flex: `0 0 ${100 / BANNERS.length}%`,
+                  height: '100%',
+                  backgroundColor: '#ffffff',
+                }}
+              >
+                <img
+                  src={banner}
+                  alt={`愛媛県の補助金・助成金ポータルのプロモーションバナー ${index + 1}`}
+                  draggable="false"
                   style={{
-                    width: `${slideWidth}px`,
-                    height: `${slideHeight}px`,
-                    flex: `0 0 ${slideWidth}px`,
-                    padding: 0,
-                    margin: 0,
-                    border: '2px solid #d6e0e4',
+                    width: '100%',
+                    height: '100%',
+                    display: 'block',
+                    objectFit: 'cover',
+                    objectPosition: 'center center',
                     backgroundColor: '#ffffff',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    boxSizing: 'border-box',
-                    opacity: isActive ? 1 : 0.62,
-                    transform: isActive ? 'scale(1)' : 'scale(0.96)',
-                    transition: 'opacity 0.35s, transform 0.35s, box-shadow 0.35s',
-                    boxShadow: isActive
-                      ? '0 14px 36px rgba(15, 23, 42, 0.16)'
-                      : '0 8px 20px rgba(15, 23, 42, 0.08)',
                   }}
-                  aria-label={`プロモーションバナー ${realSlideIndex + 1}`}
-                >
-                  <img
-                    src={img}
-                    alt={`プロモーションバナー ${realSlideIndex + 1}`}
-                    draggable="false"
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'block',
-                      objectFit: 'contain',
-                      objectPosition: 'center center',
-                      backgroundColor: '#ffffff',
-                    }}
-                  />
-                </button>
-              );
-            })}
+                />
+              </div>
+            ))}
           </div>
-        </div>
 
-        {BANNERS.length > 1 && (
-          <>
-            <button
-              type="button"
-              onClick={prevSlide}
-              style={{
-                position: 'absolute',
-                top: `calc(40px + ${slideHeight / 2}px)`,
-                left: 'clamp(18px, 7vw, 150px)',
-                transform: 'translateY(-50%)',
-                width: '58px',
-                height: '58px',
-                borderRadius: '50%',
-                border: 'none',
-                backgroundColor: 'rgba(255, 255, 255, 0.94)',
-                color: colors.primary,
-                fontSize: '24px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                backdropFilter: 'blur(6px)',
-                zIndex: 10,
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = '#ffffff';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.94)';
-              }}
-              aria-label="前のバナーへ"
-            >
-              &lt;
-            </button>
+          {BANNERS.length > 1 && (
+            <>
+              <button
+                type="button"
+                className="top-visual-arrow top-visual-arrow-prev"
+                onClick={goToPrevBanner}
+                aria-label="前のバナーへ"
+              >
+                &lt;
+              </button>
 
-            <button
-              type="button"
-              onClick={nextSlide}
-              style={{
-                position: 'absolute',
-                top: `calc(40px + ${slideHeight / 2}px)`,
-                right: 'clamp(18px, 7vw, 150px)',
-                transform: 'translateY(-50%)',
-                width: '58px',
-                height: '58px',
-                borderRadius: '50%',
-                border: 'none',
-                backgroundColor: 'rgba(255, 255, 255, 0.94)',
-                color: colors.primary,
-                fontSize: '24px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                backdropFilter: 'blur(6px)',
-                zIndex: 10,
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = '#ffffff';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.94)';
-              }}
-              aria-label="次のバナーへ"
-            >
-              &gt;
-            </button>
-          </>
-        )}
+              <button
+                type="button"
+                className="top-visual-arrow top-visual-arrow-next"
+                onClick={goToNextBanner}
+                aria-label="次のバナーへ"
+              >
+                &gt;
+              </button>
 
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '26px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-          }}
-        >
-          {BANNERS.map((_, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => goToSlide(idx)}
-              aria-label={`スライド ${idx + 1} へ移動`}
-              style={{
-                width: realSlideIndex === idx ? '34px' : '10px',
-                height: '10px',
-                borderRadius: '999px',
-                border: 'none',
-                backgroundColor: realSlideIndex === idx ? colors.primary : '#cbd5d1',
-                cursor: 'pointer',
-                transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-                padding: 0,
-              }}
-            />
-          ))}
+              <div className="top-visual-dots" aria-label="バナー切り替え">
+                {BANNERS.map((_, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className={`top-visual-dot ${
+                      currentBannerIndex === index ? 'is-active' : ''
+                    }`}
+                    onClick={() => setCurrentBannerIndex(index)}
+                    aria-label={`バナー ${index + 1} へ移動`}
+                    aria-current={currentBannerIndex === index}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </section>
 
       <div
         className="top-page-content"
-        style={{ maxWidth: '1000px', margin: '0 auto', padding: '0 24px 80px' }}
+        style={{
+          maxWidth: '1000px',
+          margin: '0 auto',
+          padding: '0 24px 80px',
+          backgroundColor: '#ffffff',
+        }}
       >
         {/* 3つの大きなボタン */}
         <div
@@ -448,7 +259,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             }}
             onMouseOver={(e) => {
               e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 16px rgba(8, 74, 85, 0.15)';
+              e.currentTarget.style.boxShadow = '0 8px 18px rgba(25, 174, 184, 0.18)';
               e.currentTarget.style.borderColor = colors.buttonColor;
             }}
             onMouseOut={(e) => {
@@ -511,7 +322,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             }}
             onMouseOver={(e) => {
               e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 16px rgba(8, 74, 85, 0.15)';
+              e.currentTarget.style.boxShadow = '0 8px 18px rgba(25, 174, 184, 0.18)';
               e.currentTarget.style.borderColor = colors.buttonColor;
             }}
             onMouseOut={(e) => {
@@ -576,7 +387,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             }}
             onMouseOver={(e) => {
               e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 16px rgba(8, 74, 85, 0.15)';
+              e.currentTarget.style.boxShadow = '0 8px 18px rgba(25, 174, 184, 0.18)';
               e.currentTarget.style.borderColor = colors.buttonColor;
             }}
             onMouseOut={(e) => {
@@ -652,7 +463,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 letterSpacing: '1px',
               }}
             >
-              <span style={{ color: '#cbd5e1' }}>🔎</span> 人気の特集から探す
+              <span style={{ color: '#19aeb8' }}>🔎</span> 人気の特集から探す
             </h3>
           </div>
 
@@ -683,7 +494,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 }}
                 onMouseOver={(e) => {
                   e.currentTarget.style.transform = 'translateY(-3px)';
-                  e.currentTarget.style.boxShadow = '0 10px 20px rgba(8, 74, 85, 0.12)';
+                  e.currentTarget.style.boxShadow = '0 10px 22px rgba(25, 174, 184, 0.14)';
                   e.currentTarget.style.borderColor = colors.primary;
                 }}
                 onMouseOut={(e) => {
@@ -780,7 +591,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 letterSpacing: '1px',
               }}
             >
-              <span style={{ color: '#cbd5e1' }}>✨</span> NEWS
+              <span style={{ color: '#19aeb8' }}>✨</span> NEWS
             </h3>
 
             <button
@@ -788,9 +599,9 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
               onClick={() => navigate('/search')}
               style={{
                 backgroundColor: 'transparent',
-                border: '1px solid #334155',
+                border: '1px solid #19aeb8',
                 borderRadius: '20px',
-                color: '#334155',
+                color: '#19aeb8',
                 fontSize: '13px',
                 fontWeight: 'bold',
                 padding: '6px 20px',
@@ -798,12 +609,12 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 transition: 'all 0.2s',
               }}
               onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = '#334155';
+                e.currentTarget.style.backgroundColor = '#19aeb8';
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = '#334155';
+                e.currentTarget.style.color = '#19aeb8';
               }}
             >
               お知らせ一覧へ
@@ -842,17 +653,18 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       display: 'flex',
                       gap: '24px',
                       padding: '20px 24px',
-                      backgroundColor: '#f8f9fa',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #edf2f3',
                       borderRadius: '4px',
                       cursor: 'pointer',
                       transition: 'background-color 0.2s',
                       alignItems: 'center',
                     }}
                     onMouseOver={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f1f5f9';
+                      e.currentTarget.style.backgroundColor = '#f3fcfd';
                     }}
                     onMouseOut={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f8f9fa';
+                      e.currentTarget.style.backgroundColor = '#ffffff';
                     }}
                   >
                     <div
@@ -871,7 +683,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       <span
                         className="top-list-badge"
                         style={{
-                          backgroundColor: '#0f7b6c',
+                          backgroundColor: '#19aeb8',
                           color: 'white',
                           padding: '6px 12px',
                           borderRadius: '4px',
@@ -932,7 +744,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 letterSpacing: '1px',
               }}
             >
-              <span style={{ color: '#cbd5e1' }}>📘</span> 今、確認しておきたい愛媛の補助金
+              <span style={{ color: '#19aeb8' }}>📘</span> 今、確認しておきたい愛媛の補助金
             </h3>
 
             <button
@@ -940,9 +752,9 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
               onClick={() => navigate('/columns')}
               style={{
                 backgroundColor: 'transparent',
-                border: '1px solid #334155',
+                border: '1px solid #19aeb8',
                 borderRadius: '20px',
-                color: '#334155',
+                color: '#19aeb8',
                 fontSize: '13px',
                 fontWeight: 'bold',
                 padding: '6px 20px',
@@ -951,12 +763,12 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                 whiteSpace: 'nowrap',
               }}
               onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = '#334155';
+                e.currentTarget.style.backgroundColor = '#19aeb8';
                 e.currentTarget.style.color = 'white';
               }}
               onMouseOut={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = '#334155';
+                e.currentTarget.style.color = '#19aeb8';
               }}
             >
               コラム一覧へ
@@ -1001,7 +813,8 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       display: 'flex',
                       gap: '24px',
                       padding: '20px 24px',
-                      backgroundColor: '#f8f9fa',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #edf2f3',
                       borderRadius: '4px',
                       cursor: 'pointer',
                       transition: 'background-color 0.2s',
@@ -1009,10 +822,10 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       textDecoration: 'none',
                     }}
                     onMouseOver={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f1f5f9';
+                      e.currentTarget.style.backgroundColor = '#f3fcfd';
                     }}
                     onMouseOut={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f8f9fa';
+                      e.currentTarget.style.backgroundColor = '#ffffff';
                     }}
                   >
                     <div
@@ -1074,7 +887,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
           className="simulator-banner"
           onClick={() => navigate('/simulator')}
           style={{
-            backgroundColor: '#197b6e',
+            backgroundColor: '#31515d',
             border: 'none',
             borderRadius: '16px',
             padding: '32px 40px',
@@ -1089,7 +902,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
           }}
           onMouseOver={(e) => {
             e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+            e.currentTarget.style.boxShadow = '0 8px 16px rgba(49, 81, 93, 0.22)';
           }}
           onMouseOut={(e) => {
             e.currentTarget.style.transform = 'translateY(0)';

@@ -130,6 +130,41 @@ export default function AdminExperts() {
     }
   };
 
+  const handleToggleExpertVisibility = async (expert) => {
+    const isCurrentlyVisible = expert.is_active !== false;
+    const nextIsActive = !isCurrentlyVisible;
+    const actionLabel = nextIsActive ? '再表示' : '非表示';
+
+    if (!window.confirm(`「${expert.name}」先生を${actionLabel}にしますか？`)) return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('experts')
+        .update({ is_active: nextIsActive })
+        .eq('id', expert.id);
+
+      if (error) throw error;
+
+      setExperts((prev) =>
+        prev.map((item) =>
+          item.id === expert.id ? { ...item, is_active: nextIsActive } : item
+        )
+      );
+
+      if (editingId === expert.id && !nextIsActive) resetForm();
+    } catch (error) {
+      alert(
+        '表示状態の変更に失敗しました: ' +
+          error.message +
+          '\n\nSupabase SQL Editorで以下を実行してください。\n' +
+          'alter table public.experts add column if not exists is_active boolean not null default true;'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/'; 
@@ -220,13 +255,19 @@ export default function AdminExperts() {
 
         <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#334155' }}>📋 登録済みの専門家 ({experts.length}名)</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {experts.map(exp => (
-            <div key={exp.id} style={{ display: 'flex', gap: '16px', alignItems: 'center', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: 'white', opacity: editingId === exp.id ? 0.5 : 1 }}>
+          {experts.map(exp => {
+            const isVisible = exp.is_active !== false;
+
+            return (
+            <div key={exp.id} style={{ display: 'flex', gap: '16px', alignItems: 'center', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: isVisible ? 'white' : '#f8fafc', opacity: editingId === exp.id ? 0.5 : isVisible ? 1 : 0.72 }}>
               <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: '#e2e8f0', overflow: 'hidden', flexShrink: 0 }}>
                 {exp.avatar_url ? <img src={exp.avatar_url} alt={exp.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>👤</div>}
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span style={{ backgroundColor: isVisible ? '#dcfce7' : '#e5e7eb', color: isVisible ? '#166534' : '#6b7280', fontSize: '11px', padding: '2px 8px', borderRadius: '999px', fontWeight: 'bold' }}>
+                    {isVisible ? '表示中' : '非表示'}
+                  </span>
                   <span style={{ backgroundColor: '#f1f5f9', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px' }}>{exp.qualification}</span>
                   <strong style={{ fontSize: '16px', color: '#1e293b' }}>{exp.name}</strong>
                 </div>
@@ -234,10 +275,14 @@ export default function AdminExperts() {
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => handleEditExpert(exp)} disabled={loading || editingId === exp.id} style={{ backgroundColor: 'white', color: colors.primary, border: `1px solid ${colors.primary}`, padding: '8px 16px', borderRadius: '6px', fontSize: '13px', cursor: (loading || editingId === exp.id) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>編集</button>
+                <button onClick={() => handleToggleExpertVisibility(exp)} disabled={loading || editingId === exp.id} style={{ backgroundColor: isVisible ? '#f8fafc' : '#ecfdf5', color: isVisible ? '#475569' : '#047857', border: isVisible ? '1px solid #cbd5e1' : '1px solid #10b981', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', cursor: (loading || editingId === exp.id) ? 'not-allowed' : 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                  {isVisible ? '非表示' : '再表示'}
+                </button>
                 <button onClick={() => handleDeleteExpert(exp.id, exp.name, exp.avatar_url)} disabled={loading} style={{ backgroundColor: '#fee2e2', color: colors.danger, border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}>削除</button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

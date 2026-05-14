@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { sanitizeSubsidyRow } = require('./subsidySafety');
 
 function getSupabaseEnv() {
   const SUPABASE_URL =
@@ -41,6 +42,8 @@ function createSupabaseClient({ requireServiceKey = false } = {}) {
 }
 
 async function upsertSubsidyBySource(supabase, row) {
+  const safeRow = sanitizeSubsidyRow(row);
+
   if (!supabase) {
     throw new Error(
       'Supabaseクライアントが未初期化です。保存するには SUPABASE_URL と SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY が必要です。'
@@ -64,7 +67,7 @@ async function upsertSubsidyBySource(supabase, row) {
     const { error: updateError } = await supabase
       .from('subsidies')
       .update({
-        ...row,
+        ...safeRow,
         imported_at: new Date().toISOString(),
       })
       .eq('id', id);
@@ -80,7 +83,7 @@ async function upsertSubsidyBySource(supabase, row) {
     .from('subsidies')
     .insert([
       {
-        ...row,
+        ...safeRow,
         imported_at: new Date().toISOString(),
       },
     ]);
