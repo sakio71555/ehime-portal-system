@@ -390,6 +390,11 @@ async function fetchPageTextDynamic(url) {
   const fetchedUrl = normalizeUrl(res.url || url);
 
   if (contentType.includes('application/pdf') || fetchedUrl.toLowerCase().endsWith('.pdf')) {
+    const pdfStats = {
+      pdf_checked: 1,
+      pdf_text_extracted: 0,
+      pdf_ocr_attempted: 0,
+    };
     try {
       console.log(`  📄 PDFデータをダウンロード＆解析中...`);
       const arrayBuffer = await res.arrayBuffer();
@@ -398,10 +403,12 @@ async function fetchPageTextDynamic(url) {
       // 1. まずは通常の pdf-parse で高速テキスト抽出
       let cleanText = await parsePdfText(buffer);
       cleanText = cleanText.replace(/\n\s*\n/g, '\n').trim();
+      if (cleanText.length > 0) pdfStats.pdf_text_extracted = 1;
       
       // 2. 🔥 OCRフォールバック: テキストが300文字未満なら「スキャン画像」と判定してOCR実行
       if (cleanText.length < 300) {
         console.log(`  ⚠️ スキャン画像PDFの可能性 (抽出文字数: ${cleanText.length}文字)。OCRフォールバックを実行します...`);
+        pdfStats.pdf_ocr_attempted = 1;
         
         // PDFを画像(Base64)に変換
         const pdfImages = await convertPdfToImages(buffer);
@@ -444,6 +451,7 @@ async function fetchPageTextDynamic(url) {
         links: [],
         linkCount: 0,
         subsidyLinkCount: 0,
+        pdfStats,
       };
     } catch (err) {
       console.log(`  ⚠️ PDFの解析(OCR含む)に失敗しました: ${err.message}`);
@@ -457,6 +465,7 @@ async function fetchPageTextDynamic(url) {
         links: [],
         linkCount: 0,
         subsidyLinkCount: 0,
+        pdfStats,
       };
     }
   }
@@ -516,6 +525,11 @@ async function fetchPageTextDynamic(url) {
     links,
     linkCount: links.length,
     subsidyLinkCount,
+    pdfStats: {
+      pdf_checked: 0,
+      pdf_text_extracted: 0,
+      pdf_ocr_attempted: 0,
+    },
   };
 }
 
@@ -642,7 +656,10 @@ function todayCompact() {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}`;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
 }
 
 function writeCandidateLog(entries) {
@@ -754,15 +771,8 @@ function buildCandidateLog({
   };
 }
 
-// ==============================================
-// 🚀 最強のメインエンジン起動
-// ==============================================
-async function runUltimateAutoPilot() {
-  console.log(`\n👑 愛媛補助金クローラー [公式seed入口・個別制度抽出版] 起動...\n`);
-  const queue = [];
-  const queuedUrls = new Set();
-  const candidateLogs = [];
-  const stats = {
+function createRunStats() {
+  return {
     publish: 0,
     wouldPublish: 0,
     reject: 0,
@@ -771,7 +781,55 @@ async function runUltimateAutoPilot() {
     errors: 0,
     parsed_pdf: 0,
     extracted_links: 0,
+    attempted_urls: 0,
+    skipped_urls: 0,
+    error_urls: 0,
+    already_existing_urls: 0,
+    save_candidates: 0,
+    inserted: 0,
+    updated: 0,
+    not_found_urls: 0,
+    external_candidates: 0,
+    pdf_checked: 0,
+    pdf_text_extracted: 0,
+    pdf_ocr_attempted: 0,
+    pdf_skipped_as_form: 0,
   };
+}
+
+function createSeedStats(seedUrl) {
+  return {
+    seed_url: seedUrl,
+    attempted_urls: 0,
+    skipped_urls: 0,
+    error_urls: 0,
+    already_existing_urls: 0,
+    not_found_urls: 0,
+    save_candidates: 0,
+    inserted: 0,
+    updated: 0,
+    extracted_links: 0,
+    external_candidates: 0,
+  };
+}
+
+function getSeedStats(seedStats, seedUrl) {
+  if (!seedStats.has(seedUrl)) {
+    seedStats.set(seedUrl, createSeedStats(seedUrl));
+  }
+  return seedStats.get(seedUrl);
+}
+
+// ==============================================
+// 🚀 最強のメインエンジン起動
+// ==============================================
+async function runUltimateAutoPilot() {
+  console.log(`\n👑 愛媛補助金クローラー [公式seed入口・個別制度抽出版] 起動...\n`);
+  const queue = [];
+  const queuedUrls = new Set();
+  const candidateLogs = [];
+  const stats = createRunStats();
+  const seedStats = new Map();
 
   console.log(
     `設定: DRY_RUN=${CONFIG.dryRun ? 'ON' : 'OFF'} / MAX_URLS=${CONFIG.maxUrls || 'なし'} / MAX_INSERTS=${CONFIG.maxInserts || 'なし'} / MAX_DEPTH=${CONFIG.maxDepth || 'seed既定'} / URL事前重複チェック=${CONFIG.prefilterRegisteredUrls ? 'ON' : 'OFF'} / SEED_ONLY=${CONFIG.seedOnly ? 'ON' : 'OFF'} / DETAIL_ONLY=${CONFIG.detailOnly ? 'ON' : 'OFF'}`
@@ -782,6 +840,7 @@ async function runUltimateAutoPilot() {
     if (!normalized || queuedUrls.has(normalized)) return false;
     const normalizedEntry = { ...entry, url: normalized };
     if (isJgrantsUrl(normalized)) {
+      const row = getSeedStats(seedStats, normalizedEntry.seed_url || normalized);
       candidateLogs.push(
         buildCandidateLog({
           entry: normalizedEntry,
@@ -792,6 +851,8 @@ async function runUltimateAutoPilot() {
         })
       );
       stats.reject++;
+      stats.skipped_urls++;
+      row.skipped_urls++;
       return false;
     }
     queuedUrls.add(normalized);
@@ -821,6 +882,9 @@ async function runUltimateAutoPilot() {
 
     console.log(`▶ 処理中: ${url}`);
     processedCount++;
+    stats.attempted_urls++;
+    const currentSeedStats = getSeedStats(seedStats, entry.seed_url || url);
+    currentSeedStats.attempted_urls++;
     
     try {
       const normalizedCandidateUrl = normalizeUrl(url);
@@ -833,12 +897,16 @@ async function runUltimateAutoPilot() {
         links,
         linkCount,
         subsidyLinkCount,
+        pdfStats,
       } = await fetchPageTextDynamic(url);
       const canonicalUrl = fetchedUrl || normalizeUrl(url);
 
       if (isPdf) {
         stats.parsed_pdf++;
       }
+      stats.pdf_checked += pdfStats?.pdf_checked || 0;
+      stats.pdf_text_extracted += pdfStats?.pdf_text_extracted || 0;
+      stats.pdf_ocr_attempted += pdfStats?.pdf_ocr_attempted || 0;
 
       const pageType = classifyPage({
         url: canonicalUrl,
@@ -866,8 +934,15 @@ async function runUltimateAutoPilot() {
       })) {
         const rankedLinks = extractCandidateLinksFromIndexPage({ links, seed: entry.seed });
         const childLinks = rankedLinks.filter((link) => link.shouldCrawl);
+        const externalLinks = rankedLinks.filter((link) => !link.isSameDomain && (link.score >= 5 || link.isPdf));
         stats.extracted_links += childLinks.length;
+        stats.external_candidates += externalLinks.length;
+        currentSeedStats.extracted_links += childLinks.length;
+        currentSeedStats.external_candidates += externalLinks.length;
         console.log(`  🧭 index判定: ${pageType} / 候補リンク ${rankedLinks.length} 件 / クロール対象 ${childLinks.length} 件`);
+        if (externalLinks.length > 0) {
+          console.log(`  🌐 allowed_domains外の候補: ${externalLinks.length} 件（ログのみ、クロールしません）`);
+        }
 
         if (rankedLinks.length > 0) {
           console.log('  候補リンク TOP 10:');
@@ -905,7 +980,7 @@ async function runUltimateAutoPilot() {
               score: link.score,
               reasons: link.reasons,
               penalties: link.penalties,
-              action: link.shouldCrawl ? 'enqueue' : 'skip',
+              action: !link.isSameDomain ? 'external_candidate' : (link.shouldCrawl ? 'enqueue' : 'skip'),
               skippedReason: link.shouldCrawl ? '' : 'score < 8 または除外キーワード',
               officialUrlDecision: 'candidate link; official_url未決定',
             })
@@ -927,6 +1002,8 @@ async function runUltimateAutoPilot() {
         }
 
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -943,11 +1020,16 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
       if (pageType === 'application_form' || isApplicationFormPage({ url: canonicalUrl, title, text: rawText })) {
         console.log(`  ⏭️ 申請書・様式ページのため除外`);
+        if (isPdf) {
+          stats.pdf_skipped_as_form++;
+        }
         candidateLogs.push(
           buildCandidateLog({
             entry,
@@ -959,6 +1041,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -975,6 +1059,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.noise++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -991,6 +1077,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++; 
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue; 
       }
 
@@ -1007,6 +1095,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1024,6 +1114,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.review++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1049,6 +1141,10 @@ async function runUltimateAutoPilot() {
             })
           );
           stats.reject++; 
+          stats.skipped_urls++;
+          stats.already_existing_urls++;
+          currentSeedStats.skipped_urls++;
+          currentSeedStats.already_existing_urls++;
           continue; 
         }
       }
@@ -1069,6 +1165,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++; 
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue; 
       }
 
@@ -1090,6 +1188,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.noise++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1106,6 +1206,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1122,6 +1224,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1151,6 +1255,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1176,6 +1282,10 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        stats.already_existing_urls++;
+        currentSeedStats.skipped_urls++;
+        currentSeedStats.already_existing_urls++;
         continue;
       }
 
@@ -1203,6 +1313,8 @@ async function runUltimateAutoPilot() {
           })
         );
         stats.reject++;
+        stats.skipped_urls++;
+        currentSeedStats.skipped_urls++;
         continue;
       }
 
@@ -1239,6 +1351,8 @@ async function runUltimateAutoPilot() {
       if (CONFIG.dryRun) {
         console.log('  🧪 DRY_RUNのため保存しません');
         stats.wouldPublish++;
+        stats.save_candidates++;
+        currentSeedStats.save_candidates++;
         continue;
       }
 
@@ -1249,13 +1363,33 @@ async function runUltimateAutoPilot() {
         stats.errors++; 
       } else { 
         stats.publish++; 
+        stats.inserted++;
+        currentSeedStats.inserted++;
       }
 
     } catch (err) { 
       if (String(err.message).includes('NO_RETRY')) {
-         console.log(`  ⏭️ スキップ: ${err.message}`); stats.reject++;
+         console.log(`  ⏭️ スキップ: ${err.message}`);
+         candidateLogs.push(
+           buildCandidateLog({
+             entry,
+             pageType: String(err.message).includes('HTTP 404') ? 'not_found' : 'unknown',
+             action: 'skip',
+             skippedReason: err.message,
+           })
+         );
+         stats.reject++;
+         stats.skipped_urls++;
+         currentSeedStats.skipped_urls++;
+         if (String(err.message).includes('HTTP 404')) {
+           stats.not_found_urls++;
+           currentSeedStats.not_found_urls++;
+         }
       } else if (err.message.includes('リダイレクト')) {
-         console.log(`  ⏭️ 削除済みスキップ`); stats.reject++;
+         console.log(`  ⏭️ 削除済みスキップ`);
+         stats.reject++;
+         stats.skipped_urls++;
+         currentSeedStats.skipped_urls++;
       } else {
          console.log(`  ❌ エラー: ${err.message}`);
          candidateLogs.push(
@@ -1266,7 +1400,10 @@ async function runUltimateAutoPilot() {
              skippedReason: err.message,
            })
          );
-         stats.errors++; 
+         stats.errors++;
+         stats.error_urls++;
+         currentSeedStats.errors = (currentSeedStats.errors || 0) + 1;
+         currentSeedStats.error_urls++;
       }
     }
     await sleep(2000); 
@@ -1274,7 +1411,23 @@ async function runUltimateAutoPilot() {
 
   console.log(`\n🏆 究極クローラー完了！`);
   writeCandidateLog(candidateLogs);
-  console.log(`✅ 追加: ${stats.publish}件 | 🧪 保存候補(DRY_RUN): ${stats.wouldPublish}件 | 👀 要確認: ${stats.review}件 | ⏭️ スキップ: ${stats.reject}件 | 🧹 ノイズ除外: ${stats.noise}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件 | 🔗 抽出リンク: ${stats.extracted_links}件`);
+  console.log(
+    `✅ 追加: ${stats.publish}件 | 🧪 保存候補(DRY_RUN): ${stats.wouldPublish}件 | 👀 要確認: ${stats.review}件 | ⏭️ スキップ: ${stats.reject}件 | 🧹 ノイズ除外: ${stats.noise}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件 | 🔗 抽出リンク: ${stats.extracted_links}件`
+  );
+  console.log(
+    `📊 URL summary: attempted=${stats.attempted_urls} / skipped=${stats.skipped_urls} / errors=${stats.error_urls} / 404=${stats.not_found_urls} / already_existing=${stats.already_existing_urls} / save_candidates=${stats.save_candidates} / inserted=${stats.inserted} / updated=${stats.updated} / external_candidates=${stats.external_candidates}`
+  );
+  console.log(
+    `📄 PDF summary: pdf_checked=${stats.pdf_checked} / pdf_text_extracted=${stats.pdf_text_extracted} / pdf_ocr_attempted=${stats.pdf_ocr_attempted} / pdf_skipped_as_form=${stats.pdf_skipped_as_form}`
+  );
+  if (seedStats.size > 0) {
+    console.log('🌱 Seed summary:');
+    for (const row of seedStats.values()) {
+      console.log(
+        `  - ${row.seed_url}: attempted=${row.attempted_urls}, skipped=${row.skipped_urls}, errors=${row.error_urls}, 404=${row.not_found_urls}, already_existing=${row.already_existing_urls}, save_candidates=${row.save_candidates}, inserted=${row.inserted}, updated=${row.updated}, extracted_links=${row.extracted_links}, external_candidates=${row.external_candidates}`
+      );
+    }
+  }
 }
 
 runUltimateAutoPilot();
