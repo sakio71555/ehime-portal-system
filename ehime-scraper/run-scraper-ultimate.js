@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
 const fetch = global.fetch || require('node-fetch');
 
 const originalWarn = console.warn;
@@ -16,11 +18,28 @@ const {
   sanitizeSubsidyRow,
   isNoisySubsidyCandidate,
 } = require('./shared/subsidySafety');
+const {
+  isJgrantsUrl,
+  normalizeSeeds,
+  isApplicationFormPage,
+  isGenericIndexTitle,
+  isLikelyIndexPage,
+  scoreCandidate,
+  classifyPage,
+  extractCandidateLinksFromIndexPage,
+  decideOfficialUrl,
+  getUrlBasename,
+  normalizeLinkText,
+} = require('./shared/urlClassifier');
 
 const { OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, TAVILY_API_KEY } = process.env;
 
-if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_KEY || !TAVILY_API_KEY) {
+if (!OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error('❌ 環境変数が不足しています。.envファイルを確認してください。');
+}
+
+if (!TAVILY_API_KEY) {
+  console.warn('⚠️ TAVILY_API_KEY が未設定です。seed_urls.json / SCRAPER_URLS の巡回のみ実行します。');
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -35,6 +54,10 @@ const CONFIG = {
   maxUrls: toPositiveInt(process.env.SCRAPER_MAX_URLS, 0),
   maxInserts: toPositiveInt(process.env.SCRAPER_MAX_INSERTS, 0),
   prefilterRegisteredUrls: process.env.SCRAPER_PREFILTER_SOURCE_URL !== '0',
+  maxDepth: toPositiveInt(process.env.SCRAPER_MAX_DEPTH, 0),
+  logCandidates: process.env.SCRAPER_LOG_CANDIDATES !== '0',
+  seedOnly: process.env.SCRAPER_SEED_ONLY === '1',
+  detailOnly: process.env.SCRAPER_DETAIL_ONLY === '1',
   seedUrls: String(process.env.SCRAPER_URLS || '')
     .split(',')
     .map((url) => url.trim())
@@ -184,6 +207,120 @@ function looksLikeSubsidyLink(text, url) {
   return /補助金|助成金|給付金|支援|支援制度|奨励金|利子補給|交付金|要領|募集|申請|手当|補助事業|ガイドブック|応援/.test(hay);
 }
 
+const EXCLUDED_LINK_AREA_SELECTOR = [
+  'header',
+  'footer',
+  'nav',
+  '.breadcrumb',
+  '.breadcrumbs',
+  '.pankuzu',
+  '.side',
+  '.sidebar',
+  '.sidemenu',
+  '.global-nav',
+  '.gnav',
+  '.local-nav',
+  '.footer',
+  '#footer',
+  '#header',
+  '#gnav',
+  '#breadcrumb',
+  '#tmp_pankuzu',
+  '#tmp_footer',
+  '#tmp_header',
+  '#tmp_menu',
+  '#tmp_lnavi',
+].join(',');
+
+const CONTENT_AREA_SELECTORS = [
+  'main',
+  'article',
+  '#tmp_contents',
+  '#contents',
+  '#main',
+  '.content',
+  '.main',
+  '.article',
+  '.entry',
+  '.body',
+];
+
+function pickContentRoot($) {
+  for (const selector of CONTENT_AREA_SELECTORS) {
+    const candidates = $(selector).filter((_, el) => $(el).find('a[href]').length > 0 || $(el).text().trim().length > 300);
+    if (candidates.length > 0) return candidates.first();
+  }
+  return $('body');
+}
+
+function getAreaFlags($, el) {
+  const classIdHaystack = $(el)
+    .parents()
+    .addBack()
+    .map((_, node) => `${$(node).attr('id') || ''} ${$(node).attr('class') || ''}`)
+    .get()
+    .join(' ');
+
+  return {
+    isLikelyNavigation:
+      $(el).closest('header, nav, .global-nav, .gnav, .local-nav, .sidemenu, .side, .sidebar, #gnav, #tmp_menu, #tmp_lnavi').length > 0 ||
+      /nav|gnav|menu|side|sidebar|lnavi|global/i.test(classIdHaystack),
+    isLikelyFooter:
+      $(el).closest('footer, .footer, #footer, #tmp_footer').length > 0 ||
+      /footer|tmp_footer/i.test(classIdHaystack),
+    isLikelyBreadcrumb:
+      $(el).closest('.breadcrumb, .breadcrumbs, .pankuzu, #breadcrumb, #tmp_pankuzu').length > 0 ||
+      /breadcrumb|breadcrumbs|pankuzu|tmp_pankuzu/i.test(classIdHaystack),
+  };
+}
+
+function findParentHeading($, el) {
+  let node = $(el);
+  for (let depth = 0; depth < 7 && node.length; depth++) {
+    const previousHeading = node.prevAll('h1,h2,h3,h4,h5,h6').first();
+    if (previousHeading.length) return normalizeLinkText(previousHeading.text());
+
+    const parent = node.parent();
+    const parentHeading = parent.children('h1,h2,h3,h4,h5,h6').first();
+    if (parentHeading.length) return normalizeLinkText(parentHeading.text());
+
+    node = parent;
+  }
+  return normalizeLinkText($('h1').first().text());
+}
+
+function getSourceContext($, el) {
+  const container = $(el).closest('li, tr, section, article, .box, .list, .item, div');
+  const text = normalizeLinkText((container.length ? container : $(el).parent()).text());
+  return text.slice(0, 220);
+}
+
+function collectCandidateLinksFromDocument($, baseUrl) {
+  const root = pickContentRoot($);
+  const links = [];
+
+  root.find('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
+    const text = normalizeLinkText($(el).text());
+    if (!href || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+    if (href.startsWith('#')) return;
+
+    const abs = resolveUrlMaybeRelative(href, baseUrl);
+    if (!abs) return;
+    const flags = getAreaFlags($, el);
+
+    links.push({
+      url: abs,
+      text,
+      sourceContext: getSourceContext($, el),
+      parentHeading: findParentHeading($, el),
+      ...flags,
+    });
+  });
+
+  return links;
+}
+
 async function fetchWithRetry(url, retries = 2) {
   for (let i = 0; i <= retries; i++) {
     const controller = new AbortController();
@@ -297,15 +434,41 @@ async function fetchPageTextDynamic(url) {
         console.log(`  ✅ OCR抽出完了: 新たに ${cleanText.length} 文字を取得しました！`);
       }
 
-      return { text: cleanText, extractedOfficialUrl: '', isPdf: true, pdfUrl: fetchedUrl, fetchedUrl };
+      return {
+        text: cleanText,
+        extractedOfficialUrl: '',
+        isPdf: true,
+        pdfUrl: fetchedUrl,
+        fetchedUrl,
+        title: getUrlBasename(fetchedUrl),
+        links: [],
+        linkCount: 0,
+        subsidyLinkCount: 0,
+      };
     } catch (err) {
       console.log(`  ⚠️ PDFの解析(OCR含む)に失敗しました: ${err.message}`);
-      return { text: '', extractedOfficialUrl: '', isPdf: true, pdfUrl: fetchedUrl, fetchedUrl };
+      return {
+        text: '',
+        extractedOfficialUrl: '',
+        isPdf: true,
+        pdfUrl: fetchedUrl,
+        fetchedUrl,
+        title: getUrlBasename(fetchedUrl),
+        links: [],
+        linkCount: 0,
+        subsidyLinkCount: 0,
+      };
     }
   }
 
   const rawHtml = await res.text();
   const $ = cheerio.load(rawHtml);
+  const title =
+    $('h1').first().text().trim() ||
+    $('title').first().text().replace(/\s+/g, ' ').trim() ||
+    getUrlBasename(fetchedUrl);
+  const links = collectCandidateLinksFromDocument($, fetchedUrl);
+  const subsidyLinkCount = links.filter((link) => looksLikeSubsidyLink(link.text, link.url)).length;
   
   let extractedOfficialUrl = '';
   let metaDataText = '';
@@ -339,11 +502,21 @@ async function fetchPageTextDynamic(url) {
     if (link.length) extractedOfficialUrl = link.attr('href');
   }
 
-  $('script, style, noscript, svg, header, footer, nav, aside, iframe').remove();
-  const mainText = $('main').text().trim() || $('article').text().trim() || $('body').text().trim();
+  const contentRoot = pickContentRoot($).clone();
+  contentRoot.find(`script, style, noscript, svg, iframe, ${EXCLUDED_LINK_AREA_SELECTOR}`).remove();
+  const mainText = contentRoot.text().trim() || $('main').text().trim() || $('article').text().trim() || $('body').text().trim();
   let cleanText = mainText.replace(/\n\s*\n/g, '\n').trim();
   
-  return { text: `${metaDataText}\n\n${cleanText}`, extractedOfficialUrl, isPdf: false, fetchedUrl };
+  return {
+    text: `${metaDataText}\n\n${cleanText}`,
+    extractedOfficialUrl,
+    isPdf: false,
+    fetchedUrl,
+    title,
+    links,
+    linkCount: links.length,
+    subsidyLinkCount,
+  };
 }
 
 async function convertPdfToImages(buffer) {
@@ -448,194 +621,436 @@ async function extractFullWithAI(text, sourceUrl) {
   return JSON.parse(res.choices[0].message.content);
 }
 
+function loadSeedObjects() {
+  const seedPath = path.join(__dirname, 'seed_urls.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+    return normalizeSeeds(raw).filter((seed) => seed.enabled);
+  } catch (err) {
+    console.warn(`⚠️ seed_urls.json の読み込みに失敗しました。内蔵seedを使用します: ${err.message}`);
+    return normalizeSeeds(SEED_URLS).filter((seed) => seed.enabled);
+  }
+}
+
+function buildSeedsFromConfig() {
+  if (CONFIG.seedUrls.length === 0) return loadSeedObjects();
+  return normalizeSeeds({ 指定URL: CONFIG.seedUrls }).filter((seed) => seed.enabled);
+}
+
+function todayCompact() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}
+
+function writeCandidateLog(entries) {
+  if (!CONFIG.logCandidates || entries.length === 0) return;
+  const logDir = path.join(__dirname, 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const logPath = path.join(logDir, `candidates_${todayCompact()}.json`);
+  fs.writeFileSync(logPath, `${JSON.stringify(entries, null, 2)}\n`);
+  console.log(`📝 candidate log: ${logPath}`);
+}
+
+function createQueueEntry({ url, seed, discoveredFromUrl = '', depth = 0 }) {
+  return {
+    url: normalizeUrl(url),
+    seed,
+    seed_url: seed?.url || normalizeUrl(url),
+    discovered_from_url: discoveredFromUrl,
+    depth,
+  };
+}
+
+function isBadApplicationPeriod(value, parsedData = {}) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  const title = String(parsedData.title || '').trim();
+  if (title && text === title) return true;
+  if (/^(申請期間|受付期間|募集期間|対象者|対象経費|補助率|上限金額)$/.test(text)) return true;
+  if (text.length <= 8 && /期間|対象|概要|詳細/.test(text)) return true;
+  if (/補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童/.test(text)) {
+    return true;
+  }
+  if (/補助金|助成金|支援事業/.test(text) && !/\d{4}|令和|平成|月|日|随時|終了/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function pickKnownSubsidyColumns(row) {
+  const allowedKeys = [
+    'title',
+    'organization',
+    'region_text',
+    'prefecture',
+    'municipality',
+    'application_status',
+    'application_period_text',
+    'application_start_date',
+    'application_end_date',
+    'amount_text',
+    'amount_max_yen',
+    'subsidy_rate_text',
+    'target_expenses_arr',
+    'target_entities_arr',
+    'purposes',
+    'industries',
+    'tags',
+    'official_url',
+    'summary',
+    'crawl_status',
+    'is_active',
+    'source_url',
+    'dedupe_key',
+  ];
+
+  return allowedKeys.reduce((acc, key) => {
+    if (Object.prototype.hasOwnProperty.call(row, key)) acc[key] = row[key];
+    return acc;
+  }, {});
+}
+
+function normalizeDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+function buildCandidateLog({
+  entry,
+  pageType = 'unknown',
+  title = '',
+  text = '',
+  parentHeading = '',
+  reasons = [],
+  penalties = [],
+  score = 0,
+  action = '',
+  reason = '',
+  officialUrlDecision = '',
+  skippedReason = '',
+  extractedLinksCount = 0,
+}) {
+  return {
+    seed_url: entry?.seed_url || '',
+    discovered_from_url: entry?.discovered_from_url || '',
+    candidate_url: entry?.url || '',
+    text,
+    parentHeading,
+    page_type: pageType,
+    title,
+    score,
+    reasons,
+    penalties,
+    action,
+    reason,
+    official_url_decision: officialUrlDecision,
+    skipped_reason: skippedReason,
+    extracted_links_count: extractedLinksCount,
+    is_jgrants_url: isJgrantsUrl(entry?.url || ''),
+  };
+}
+
 // ==============================================
 // 🚀 最強のメインエンジン起動
 // ==============================================
 async function runUltimateAutoPilot() {
-  console.log(`\n👑 愛媛補助金クローラー [究極UI・PDF OCR完全統合版] 起動...\n`);
-  const targetUrls = new Set();
-  const pdfQueue = new Set(); 
-  const stats = { publish: 0, wouldPublish: 0, reject: 0, noise: 0, errors: 0, parsed_pdf: 0 }; 
+  console.log(`\n👑 愛媛補助金クローラー [公式seed入口・個別制度抽出版] 起動...\n`);
+  const queue = [];
+  const queuedUrls = new Set();
+  const candidateLogs = [];
+  const stats = {
+    publish: 0,
+    wouldPublish: 0,
+    reject: 0,
+    review: 0,
+    noise: 0,
+    errors: 0,
+    parsed_pdf: 0,
+    extracted_links: 0,
+  };
 
   console.log(
-    `設定: DRY_RUN=${CONFIG.dryRun ? 'ON' : 'OFF'} / MAX_URLS=${CONFIG.maxUrls || 'なし'} / MAX_INSERTS=${CONFIG.maxInserts || 'なし'} / URL事前重複チェック=${CONFIG.prefilterRegisteredUrls ? 'ON' : 'OFF'}`
+    `設定: DRY_RUN=${CONFIG.dryRun ? 'ON' : 'OFF'} / MAX_URLS=${CONFIG.maxUrls || 'なし'} / MAX_INSERTS=${CONFIG.maxInserts || 'なし'} / MAX_DEPTH=${CONFIG.maxDepth || 'seed既定'} / URL事前重複チェック=${CONFIG.prefilterRegisteredUrls ? 'ON' : 'OFF'} / SEED_ONLY=${CONFIG.seedOnly ? 'ON' : 'OFF'} / DETAIL_ONLY=${CONFIG.detailOnly ? 'ON' : 'OFF'}`
   );
 
-  if (CONFIG.seedUrls.length > 0) {
-    CONFIG.seedUrls.forEach((url) => targetUrls.add(normalizeUrl(url)));
-    console.log(`📌 SCRAPER_URLS指定のため探索を省略します: ${targetUrls.size} 件`);
-  } else {
-  
-    console.log('📡 [フェーズ0] シードURLから子リンクを展開します...');
-    for (const strategy of EHIME_STRATEGIES) {
-      const seeds = SEED_URLS[strategy.name] || [];
-      for (const seed of seeds) {
-        targetUrls.add(normalizeUrl(seed));
-        const childLinks = await collectLinksFromHub(seed, strategy.domain);
-        childLinks.forEach(link => targetUrls.add(link));
-        await sleep(1000);
-      }
+  const enqueue = (entry, reason = '') => {
+    const normalized = normalizeUrl(entry.url);
+    if (!normalized || queuedUrls.has(normalized)) return false;
+    const normalizedEntry = { ...entry, url: normalized };
+    if (isJgrantsUrl(normalized)) {
+      candidateLogs.push(
+        buildCandidateLog({
+          entry: normalizedEntry,
+          pageType: 'jgrants_page',
+          action: 'skip',
+          reason,
+          skippedReason: 'JグランツURLは通常クローラー対象外',
+        })
+      );
+      stats.reject++;
+      return false;
     }
-    console.log(`  ➔ 初期URL総数: ${targetUrls.size} 件`);
+    queuedUrls.add(normalized);
+    queue.push(normalizedEntry);
+    return true;
+  };
 
-    console.log('\n📡 [フェーズ1] J-Net21のデータベースを徹底検索します...');
-    for (const area of EHIME_AREAS) {
-      let queries = [];
-      if (area === '全国') {
-        queries = [
-          `site:j-net21.smrj.go.jp/snavi2/articles/ "地域" "全国" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-          `site:j-net21.smrj.go.jp/snavi2/articles/ ("【全国】" OR "〖全国〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-        ];
-      } else {
-        queries = [
-          `site:j-net21.smrj.go.jp/snavi2/articles/ "${area}" ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-          `site:j-net21.smrj.go.jp/snavi2/articles/ ("実施機関" "${area}" OR "〖${area}〗") ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-        ];
-      }
+  const seeds = buildSeedsFromConfig();
+  seeds.forEach((seed) => enqueue(createQueueEntry({ url: seed.url, seed }), 'seed_url'));
+  console.log(`📌 seed URL: ${seeds.length} 件 / 初期キュー: ${queue.length} 件`);
 
-      for (let i = 0; i < queries.length; i++) {
-        try {
-          const res = await fetch('https://api.tavily.com/search', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: TAVILY_API_KEY, query: queries[i], search_depth: "basic", max_results: (area === '全国' ? 20 : 10) }) 
-          });
-        
-          if (!res.ok) { 
-            if (res.status === 429 || res.status >= 500) {
-              console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
-              await sleep(10000); 
-              i--; 
-              continue; 
-            } else {
-              console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
-              break;
-            }
-          }
+  let processedCount = 0;
 
-          const data = await res.json();
-          if (data.results) {
-            data.results.forEach(r => {
-              const nUrl = normalizeUrl(r.url);
-              if (nUrl.match(/\/articles\/\d+/) && !targetUrls.has(nUrl)) targetUrls.add(nUrl);
-            });
-          }
-        } catch (e) {
-          console.log(`    ⚠️ Tavily検索例外 (フェーズ1): ${e.message}`);
-        }
-        await sleep(2500); 
-      }
+  while (queue.length > 0) {
+    const entry = queue.shift();
+    const url = entry.url;
+
+    if (CONFIG.maxUrls && processedCount >= CONFIG.maxUrls) {
+      console.log(`🛑 SCRAPER_MAX_URLS=${CONFIG.maxUrls} に達したため終了します。`);
+      break;
     }
 
-    console.log('\n📡 [フェーズ2] 秘伝の書に基づく各自治体の公式HP直撃検索を開始します...');
-    for (const strategy of EHIME_STRATEGIES) {
-      const localQueries = [
-        `site:${strategy.domain} ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`,
-        `site:${strategy.domain} (${strategy.keywords}) ${BASE_SUBSIDY_WORDS} ${EXCLUDE_WORDS}`
-      ];
-
-      for (let i = 0; i < localQueries.length; i++) {
-        try {
-          const res = await fetch('https://api.tavily.com/search', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: TAVILY_API_KEY, query: localQueries[i], search_depth: "advanced", max_results: 15 }) 
-          });
-        
-          if (!res.ok) { 
-            if (res.status === 429 || res.status >= 500) {
-              console.log(`    ⚠️ API制限/サーバーエラー (${res.status}): 10秒待機して再トライします...`);
-              await sleep(10000); 
-              i--; 
-              continue; 
-            } else {
-              console.error(`    ❌ 予期せぬAPIエラー (${res.status}): スキップします。`);
-              break;
-            }
-          }
-
-          const data = await res.json();
-          if (data.results) {
-            data.results.forEach(r => {
-              const nUrl = normalizeUrl(r.url);
-              const hint = `${r.title || ''} ${r.content || ''}`;
-              if (shouldKeepUrl(nUrl, strategy.domain) && looksLikeSubsidyLink(hint, nUrl) && !targetUrls.has(nUrl)) {
-                targetUrls.add(nUrl);
-              }
-            });
-          }
-        } catch (e) {
-          console.log(`    ⚠️ Tavily検索例外 (フェーズ2): ${e.message}`);
-        }
-        await sleep(3000); 
-      }
-    }
-  }
-
-  const finalUrls = Array.from(targetUrls).slice(0, CONFIG.maxUrls || undefined);
-  console.log(`\n🤖 解析対象: 合計 ${finalUrls.length} 件のURLを処理します...\n`);
-
-  for (const url of finalUrls) {
     if (CONFIG.maxInserts && (stats.publish + stats.wouldPublish) >= CONFIG.maxInserts) {
       console.log(`🛑 SCRAPER_MAX_INSERTS=${CONFIG.maxInserts} に達したため終了します。`);
       break;
     }
 
     console.log(`▶ 処理中: ${url}`);
+    processedCount++;
     
     try {
       const normalizedCandidateUrl = normalizeUrl(url);
-
-      if (CONFIG.prefilterRegisteredUrls) {
-        const { data: registeredRows, error: registeredErr } = await supabase
-          .from('subsidies')
-          .select('id')
-          .eq('source_url', normalizedCandidateUrl)
-          .limit(1);
-
-        if (registeredErr) throw new Error(`source_url事前確認エラー: ${registeredErr.message}`);
-
-        if (registeredRows && registeredRows.length > 0) {
-          console.log(`  ⏭️ URL登録済みスキップ`);
-          stats.reject++;
-          continue;
-        }
-      }
-
-      const { text: rawText, extractedOfficialUrl, isPdf, fetchedUrl } = await fetchPageTextDynamic(url);
+      const {
+        text: rawText,
+        extractedOfficialUrl,
+        isPdf,
+        fetchedUrl,
+        title,
+        links,
+        linkCount,
+        subsidyLinkCount,
+      } = await fetchPageTextDynamic(url);
       const canonicalUrl = fetchedUrl || normalizeUrl(url);
 
       if (isPdf) {
         stats.parsed_pdf++;
       }
-      
-      if (url.includes('j-net21.smrj.go.jp') && extractedOfficialUrl?.startsWith('http')) {
-        const officialUrl = normalizeUrl(extractedOfficialUrl);
-        if (!targetUrls.has(officialUrl)) {
-          targetUrls.add(officialUrl);
-          finalUrls.push(officialUrl); 
+
+      const pageType = classifyPage({
+        url: canonicalUrl,
+        title,
+        text: rawText,
+        linkCount,
+        subsidyLinkCount,
+        isPdf,
+      });
+      const score = scoreCandidate({
+        url: canonicalUrl,
+        title,
+        text: rawText,
+        linkCount,
+        pageType,
+      });
+      const maxDepth = CONFIG.maxDepth || entry.seed?.max_depth || 2;
+
+      if (pageType === 'municipal_index' || pageType === 'category_index' || isLikelyIndexPage({
+        url: canonicalUrl,
+        title,
+        text: rawText,
+        linkCount,
+        subsidyLinkCount,
+      })) {
+        const rankedLinks = extractCandidateLinksFromIndexPage({ links, seed: entry.seed });
+        const childLinks = rankedLinks.filter((link) => link.shouldCrawl);
+        stats.extracted_links += childLinks.length;
+        console.log(`  🧭 index判定: ${pageType} / 候補リンク ${rankedLinks.length} 件 / クロール対象 ${childLinks.length} 件`);
+
+        if (rankedLinks.length > 0) {
+          console.log('  候補リンク TOP 10:');
+          rankedLinks.slice(0, 10).forEach((link) => {
+            const actionLabel = link.shouldCrawl ? 'crawl' : 'skip';
+            console.log(`    [score ${link.score}] ${link.text || '(no text)'} - ${actionLabel} - ${link.url}`);
+          });
         }
-        console.log(`  🔁 J-Net21から公式URLへ引き継ぎ: ${officialUrl}`);
-        stats.reject++; 
+
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'extract_links',
+            reason: '一覧・カテゴリページのため保存せず子リンクを探索',
+            officialUrlDecision: 'indexページはofficial_urlにしない',
+            extractedLinksCount: rankedLinks.length,
+          })
+        );
+
+        rankedLinks.slice(0, 80).forEach((link) => {
+          candidateLogs.push(
+            buildCandidateLog({
+              entry: {
+                ...entry,
+                url: link.url,
+                discovered_from_url: canonicalUrl,
+              },
+              pageType: 'candidate_link',
+              title: link.text,
+              text: link.text,
+              parentHeading: link.parentHeading,
+              score: link.score,
+              reasons: link.reasons,
+              penalties: link.penalties,
+              action: link.shouldCrawl ? 'enqueue' : 'skip',
+              skippedReason: link.shouldCrawl ? '' : 'score < 8 または除外キーワード',
+              officialUrlDecision: 'candidate link; official_url未決定',
+            })
+          );
+        });
+
+        if (!CONFIG.seedOnly && !CONFIG.detailOnly && entry.depth < maxDepth) {
+          childLinks.forEach((link) => {
+            enqueue(
+              createQueueEntry({
+                url: link.url,
+                seed: entry.seed,
+                discoveredFromUrl: canonicalUrl,
+                depth: entry.depth + 1,
+              }),
+              'index_child_candidate'
+            );
+          });
+        }
+
+        stats.reject++;
+        continue;
+      }
+
+      if (pageType === 'jgrants_page') {
+        console.log(`  ⏭️ JグランツURLのため通常クローラーでは除外`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'skip',
+            skippedReason: 'Jグランツは import-jgrants.js 側で処理',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
+
+      if (pageType === 'application_form' || isApplicationFormPage({ url: canonicalUrl, title, text: rawText })) {
+        console.log(`  ⏭️ 申請書・様式ページのため除外`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType: 'application_form',
+            title,
+            score,
+            action: 'skip',
+            skippedReason: '申請書・様式・記入例のみ',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
+
+      if (pageType === 'noise_page') {
+        console.log(`  ⏭️ ノイズページのため除外`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'skip',
+            skippedReason: '補助金個別制度ではないページ',
+          })
+        );
+        stats.noise++;
         continue;
       }
 
       if (!rawText || rawText.length < 100) { 
         console.log(`  ⏭️ テキスト取得失敗スキップ (または短すぎます)`); 
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'skip',
+            skippedReason: '本文が短すぎる',
+          })
+        );
         stats.reject++; 
         continue; 
       }
 
-      const { data: existingRows, error: existingErr } = await supabase
-        .from('subsidies')
-        .select('id')
-        .eq('source_url', canonicalUrl)
-        .limit(1);
+      if (score <= 2) {
+        console.log(`  ⏭️ score=${score} のため除外`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'skip',
+            skippedReason: 'score <= 2',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
 
-      if (existingErr) throw new Error(`source_url確認エラー: ${existingErr.message}`);
+      if (score < 8) {
+        console.log(`  👀 review_candidate: score=${score} のため保存せずログのみ`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'review_candidate',
+            reason: 'score 3〜7 は手動確認候補',
+            skippedReason: '保存保留',
+          })
+        );
+        stats.review++;
+        continue;
+      }
 
-      if (existingRows && existingRows.length > 0) { 
-        console.log(`  ⏭️ URL登録済みスキップ`); 
-        stats.reject++; 
-        continue; 
+      if (CONFIG.prefilterRegisteredUrls) {
+        const { data: existingRows, error: existingErr } = await supabase
+          .from('subsidies')
+          .select('id')
+          .eq('source_url', canonicalUrl)
+          .limit(1);
+
+        if (existingErr) throw new Error(`source_url確認エラー: ${existingErr.message}`);
+
+        if (existingRows && existingRows.length > 0) { 
+          console.log(`  ⏭️ URL登録済みスキップ`); 
+          candidateLogs.push(
+            buildCandidateLog({
+              entry,
+              pageType,
+              title,
+              score,
+              action: 'skip',
+              skippedReason: 'source_url登録済み',
+            })
+          );
+          stats.reject++; 
+          continue; 
+        }
       }
 
       let parsedData = await extractFullWithAI(rawText, canonicalUrl);
@@ -643,6 +1058,16 @@ async function runUltimateAutoPilot() {
 
       if (!parsedData.is_subsidy || isOtherPrefecture) { 
         console.log(`  ⏭️ 非補助金 または 他県データスキップ`); 
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title,
+            score,
+            action: 'skip',
+            skippedReason: isOtherPrefecture ? '他県データ' : 'AI判定で非補助金',
+          })
+        );
         stats.reject++; 
         continue; 
       }
@@ -654,7 +1079,103 @@ async function runUltimateAutoPilot() {
 
       if (noiseReason) {
         console.log(`  ⏭️ ノイズ除外: ${noiseReason}`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            skippedReason: noiseReason,
+          })
+        );
         stats.noise++;
+        continue;
+      }
+
+      if (isGenericIndexTitle(parsedData.title)) {
+        console.log(`  ⏭️ 汎用一覧タイトルのため保存しません: ${parsedData.title}`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            skippedReason: '汎用的な一覧・支援制度タイトル',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
+
+      if (isBadApplicationPeriod(parsedData.application_period_text, parsedData)) {
+        console.log(`  ⏭️ 申請期間が見出し値の可能性があるため保存しません`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            skippedReason: 'application_period_text が見出し値の可能性',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
+
+      const officialDecision = decideOfficialUrl({
+        pageType,
+        sourceUrl: canonicalUrl,
+        extractedOfficialUrl,
+      });
+      const safeOfficialUrl = officialDecision.officialUrl;
+
+      if (
+        !safeOfficialUrl ||
+        isJgrantsUrl(safeOfficialUrl) ||
+        isLikelyIndexPage({ url: safeOfficialUrl }) ||
+        isApplicationFormPage({ url: safeOfficialUrl, title: getUrlBasename(safeOfficialUrl) })
+      ) {
+        console.log(`  ⏭️ official_url不適合のため保存しません: ${officialDecision.reason}`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            officialUrlDecision: officialDecision.reason,
+            skippedReason: 'official_url が個別制度ページではない',
+          })
+        );
+        stats.reject++;
+        continue;
+      }
+
+      const { data: existingByOfficialUrlRows, error: officialUrlErr } = await supabase
+        .from('subsidies')
+        .select('id')
+        .eq('official_url', safeOfficialUrl)
+        .limit(1);
+
+      if (officialUrlErr) throw new Error(`official_url確認エラー: ${officialUrlErr.message}`);
+
+      if (existingByOfficialUrlRows && existingByOfficialUrlRows.length > 0) {
+        console.log(`  ⏭️ official_url登録済みスキップ`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            officialUrlDecision: officialDecision.reason,
+            skippedReason: 'official_url登録済み',
+          })
+        );
+        stats.reject++;
         continue;
       }
 
@@ -670,26 +1191,24 @@ async function runUltimateAutoPilot() {
 
       if (existingByKeyRows && existingByKeyRows.length > 0) {
         console.log(`  ⏭️ 制度重複スキップ (同内容の制度が既に存在します)`);
+        candidateLogs.push(
+          buildCandidateLog({
+            entry,
+            pageType,
+            title: parsedData.title || title,
+            score,
+            action: 'skip',
+            officialUrlDecision: officialDecision.reason,
+            skippedReason: 'dedupe_key登録済み',
+          })
+        );
         stats.reject++;
         continue;
       }
 
       console.log(`  ✨ 結果: ${parsedData.title} (ステータス:${parsedData.application_status})`);
 
-      const safeOfficialUrl = resolveUrlMaybeRelative(
-        (parsedData.official_url && parsedData.official_url !== '不明') 
-          ? parsedData.official_url.trim() 
-          : (extractedOfficialUrl ? extractedOfficialUrl.trim() : canonicalUrl),
-        canonicalUrl
-      );
-
-      const { is_subsidy, confidence, raw_excerpt, official_url, ...dbData } = parsedData;
-      
-      const normalizeDate = (v) => {
-        if (!v) return null;
-        const s = String(v).trim();
-        return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
-      };
+      const { is_subsidy, confidence, raw_excerpt, official_url, fiscal_year, ...dbData } = parsedData;
 
       const normalizedDbData = {
         ...dbData,
@@ -697,14 +1216,25 @@ async function runUltimateAutoPilot() {
         application_end_date: normalizeDate(dbData.application_end_date),
       };
       
-      const insertRow = sanitizeSubsidyRow({ 
+      const insertRow = sanitizeSubsidyRow(pickKnownSubsidyColumns({ 
         ...normalizedDbData, 
         official_url: safeOfficialUrl, 
         dedupe_key: dedupeKey,
         crawl_status: 'draft', 
         is_active: false, 
         source_url: canonicalUrl 
-      });
+      }));
+
+      candidateLogs.push(
+        buildCandidateLog({
+          entry,
+          pageType,
+          title: parsedData.title || title,
+          score,
+          action: CONFIG.dryRun ? 'dry_run_save_candidate' : 'save',
+          officialUrlDecision: officialDecision.reason,
+        })
+      );
 
       if (CONFIG.dryRun) {
         console.log('  🧪 DRY_RUNのため保存しません');
@@ -727,14 +1257,24 @@ async function runUltimateAutoPilot() {
       } else if (err.message.includes('リダイレクト')) {
          console.log(`  ⏭️ 削除済みスキップ`); stats.reject++;
       } else {
-         console.log(`  ❌ エラー: ${err.message}`); stats.errors++; 
+         console.log(`  ❌ エラー: ${err.message}`);
+         candidateLogs.push(
+           buildCandidateLog({
+             entry,
+             pageType: 'unknown',
+             action: 'error',
+             skippedReason: err.message,
+           })
+         );
+         stats.errors++; 
       }
     }
     await sleep(2000); 
   }
 
   console.log(`\n🏆 究極クローラー完了！`);
-  console.log(`✅ 追加: ${stats.publish}件 | 🧪 保存候補(DRY_RUN): ${stats.wouldPublish}件 | ⏭️ スキップ: ${stats.reject}件 | 🧹 ノイズ除外: ${stats.noise}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件`);
+  writeCandidateLog(candidateLogs);
+  console.log(`✅ 追加: ${stats.publish}件 | 🧪 保存候補(DRY_RUN): ${stats.wouldPublish}件 | 👀 要確認: ${stats.review}件 | ⏭️ スキップ: ${stats.reject}件 | 🧹 ノイズ除外: ${stats.noise}件 | ❌ エラー: ${stats.errors}件 | 📄 PDF解析済: ${stats.parsed_pdf}件 | 🔗 抽出リンク: ${stats.extracted_links}件`);
 }
 
 runUltimateAutoPilot();

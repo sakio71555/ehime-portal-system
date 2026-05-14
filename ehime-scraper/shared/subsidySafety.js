@@ -39,6 +39,18 @@ function isNoisySubsidyCandidate(candidate = {}) {
   if (/認定申請|保証[45]号|セーフティネット保証|危機関連保証/.test(title)) {
     return '認定・保証申請ページの可能性が高い';
   }
+  if (/商品券|キャンペーン/.test(title) && !hasSubsidyWord) {
+    return '商品券・キャンペーン案内の可能性が高い';
+  }
+  if (/融資制度/.test(title) && !/利子補給|補助金|助成金|支援金/.test(title)) {
+    return '融資制度のみの案内の可能性が高い';
+  }
+  if (/導入計画/.test(title) && !hasSubsidyWord) {
+    return '導入計画のみの案内の可能性が高い';
+  }
+  if (/ビジョン|計画策定|策定しました|報告書/.test(title) && !hasSubsidyWord) {
+    return '計画・報告ページの可能性が高い';
+  }
   if (/手当/.test(title) && !/補助金|助成金|支援金|給付金/.test(title)) {
     return '手当制度の案内の可能性が高い';
   }
