@@ -190,8 +190,9 @@ function normalizeSeeds(rawSeeds) {
 }
 
 function normalizeSeedObject(name, seed) {
-  const url = normalizeUrl(seed.url);
-  const hostname = getHostname(url);
+  const url = String(seed.url || '').trim();
+  const normalizedForHost = normalizeUrl(url);
+  const hostname = getHostname(normalizedForHost || url);
   return {
     name,
     url,

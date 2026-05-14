@@ -174,12 +174,25 @@ function normalizeUrl(rawUrl) {
   } catch (e) { return rawUrl; }
 }
 
+function normalizeFetchUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    u.hash = '';
+    ['utm_source', 'utm_medium', 'utm_campaign'].forEach(p => u.searchParams.delete(p));
+    return u.toString();
+  } catch (e) { return rawUrl; }
+}
+
+function normalizeUrlKey(rawUrl) {
+  return normalizeUrl(rawUrl);
+}
+
 function resolveUrlMaybeRelative(rawUrl, baseUrl) {
   if (!rawUrl) return '';
   try {
-    return normalizeUrl(new URL(rawUrl, baseUrl).toString());
+    return normalizeFetchUrl(new URL(rawUrl, baseUrl).toString());
   } catch {
-    return normalizeUrl(rawUrl);
+    return normalizeFetchUrl(rawUrl);
   }
 }
 
@@ -333,10 +346,42 @@ async function fetchWithRetry(url, retries = 2) {
       clearTimeout(timeout);
       
       if (!res.ok) {
+        if (res.status === 404) {
+          const slashFallbackUrl = getTrailingSlashFallbackUrl(url);
+          if (slashFallbackUrl) {
+            console.log(`  ↪️ 404のため末尾スラッシュ付きで再試行: ${slashFallbackUrl}`);
+            const fallbackController = new AbortController();
+            const fallbackTimeout = setTimeout(() => fallbackController.abort(), 15000);
+            try {
+              const fallbackRes = await fetch(slashFallbackUrl, {
+                signal: fallbackController.signal,
+                headers: { 'User-Agent': 'EhimeSubsidyBot/Ultimate' },
+              });
+              clearTimeout(fallbackTimeout);
+              if (fallbackRes.ok) return fallbackRes;
+              if (fallbackRes.status === 429 || fallbackRes.status >= 500) {
+                throw new Error(`RETRYABLE_HTTP ${fallbackRes.status}`);
+              }
+              const fallbackErr = new Error(`HTTP ${fallbackRes.status} NO_RETRY`);
+              fallbackErr.statusCode = fallbackRes.status;
+              fallbackErr.fetchUrl = slashFallbackUrl;
+              fallbackErr.finalUrl = fallbackRes.url || slashFallbackUrl;
+              throw fallbackErr;
+            } catch (fallbackErr) {
+              clearTimeout(fallbackTimeout);
+              if (String(fallbackErr.message).includes('NO_RETRY')) throw fallbackErr;
+              throw fallbackErr;
+            }
+          }
+        }
         if (res.status === 429 || res.status >= 500) {
           throw new Error(`RETRYABLE_HTTP ${res.status}`);
         }
-        throw new Error(`HTTP ${res.status} NO_RETRY`);
+        const err = new Error(`HTTP ${res.status} NO_RETRY`);
+        err.statusCode = res.status;
+        err.fetchUrl = url;
+        err.finalUrl = res.url || url;
+        throw err;
       }
 
       if (url.includes('j-net21') && res.url && !res.url.match(/\/articles\/\d+/)) {
@@ -351,6 +396,19 @@ async function fetchWithRetry(url, retries = 2) {
       
       await sleep(2000 * (i + 1));
     }
+  }
+}
+
+function getTrailingSlashFallbackUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/')) return '';
+    const lastSegment = u.pathname.split('/').pop() || '';
+    if (/\.[a-z0-9]{2,6}$/i.test(lastSegment)) return '';
+    u.pathname = `${u.pathname}/`;
+    return u.toString();
+  } catch {
+    return '';
   }
 }
 
@@ -370,7 +428,7 @@ async function collectLinksFromHub(url, domain) {
       if (!href) return;
 
       try {
-        const abs = normalizeUrl(new URL(href, url).toString());
+        const abs = normalizeFetchUrl(new URL(href, url).toString());
         if (shouldKeepUrl(abs, domain) && looksLikeSubsidyLink(text, abs)) {
           links.add(abs);
         }
@@ -387,7 +445,9 @@ async function collectLinksFromHub(url, domain) {
 async function fetchPageTextDynamic(url) {
   const res = await fetchWithRetry(url);
   const contentType = res.headers.get('content-type') || '';
-  const fetchedUrl = normalizeUrl(res.url || url);
+  const fetchedUrl = normalizeFetchUrl(res.url || url);
+  const statusCode = res.status;
+  const isRedirected = Boolean(res.redirected || (res.url && normalizeFetchUrl(res.url) !== normalizeFetchUrl(url)));
 
   if (contentType.includes('application/pdf') || fetchedUrl.toLowerCase().endsWith('.pdf')) {
     const pdfStats = {
@@ -447,6 +507,8 @@ async function fetchPageTextDynamic(url) {
         isPdf: true,
         pdfUrl: fetchedUrl,
         fetchedUrl,
+        statusCode,
+        isRedirected,
         title: getUrlBasename(fetchedUrl),
         links: [],
         linkCount: 0,
@@ -461,6 +523,8 @@ async function fetchPageTextDynamic(url) {
         isPdf: true,
         pdfUrl: fetchedUrl,
         fetchedUrl,
+        statusCode,
+        isRedirected,
         title: getUrlBasename(fetchedUrl),
         links: [],
         linkCount: 0,
@@ -521,6 +585,8 @@ async function fetchPageTextDynamic(url) {
     extractedOfficialUrl,
     isPdf: false,
     fetchedUrl,
+    statusCode,
+    isRedirected,
     title,
     links,
     linkCount: links.length,
@@ -672,10 +738,15 @@ function writeCandidateLog(entries) {
 }
 
 function createQueueEntry({ url, seed, discoveredFromUrl = '', depth = 0 }) {
+  const originalUrl = url;
+  const fetchUrl = normalizeFetchUrl(url);
   return {
-    url: normalizeUrl(url),
+    url: fetchUrl,
+    original_url: originalUrl,
+    fetch_url: fetchUrl,
+    normalized_key: normalizeUrlKey(fetchUrl),
     seed,
-    seed_url: seed?.url || normalizeUrl(url),
+    seed_url: seed?.url || fetchUrl,
     discovered_from_url: discoveredFromUrl,
     depth,
   };
@@ -753,6 +824,11 @@ function buildCandidateLog({
 }) {
   return {
     seed_url: entry?.seed_url || '',
+    original_url: entry?.original_url || entry?.url || '',
+    fetch_url: entry?.fetch_url || entry?.url || '',
+    final_url: entry?.final_url || '',
+    status_code: entry?.status_code || '',
+    is_redirected: Boolean(entry?.is_redirected),
     discovered_from_url: entry?.discovered_from_url || '',
     candidate_url: entry?.url || '',
     text,
@@ -800,6 +876,11 @@ function createRunStats() {
 function createSeedStats(seedUrl) {
   return {
     seed_url: seedUrl,
+    original_url: seedUrl,
+    fetch_url: seedUrl,
+    final_url: '',
+    status_code: '',
+    is_redirected: false,
     attempted_urls: 0,
     skipped_urls: 0,
     error_urls: 0,
@@ -836,10 +917,17 @@ async function runUltimateAutoPilot() {
   );
 
   const enqueue = (entry, reason = '') => {
-    const normalized = normalizeUrl(entry.url);
+    const fetchUrl = entry.fetch_url || normalizeFetchUrl(entry.url);
+    const normalized = entry.normalized_key || normalizeUrlKey(fetchUrl);
     if (!normalized || queuedUrls.has(normalized)) return false;
-    const normalizedEntry = { ...entry, url: normalized };
-    if (isJgrantsUrl(normalized)) {
+    const normalizedEntry = {
+      ...entry,
+      url: fetchUrl,
+      fetch_url: fetchUrl,
+      normalized_key: normalized,
+      seed_url: entry.seed_url || entry.seed?.url || fetchUrl,
+    };
+    if (isJgrantsUrl(fetchUrl) || isJgrantsUrl(normalized)) {
       const row = getSeedStats(seedStats, normalizedEntry.seed_url || normalized);
       candidateLogs.push(
         buildCandidateLog({
@@ -884,6 +972,10 @@ async function runUltimateAutoPilot() {
     processedCount++;
     stats.attempted_urls++;
     const currentSeedStats = getSeedStats(seedStats, entry.seed_url || url);
+    if (entry.depth === 0) {
+      currentSeedStats.original_url = entry.original_url || currentSeedStats.original_url || url;
+      currentSeedStats.fetch_url = entry.fetch_url || url;
+    }
     currentSeedStats.attempted_urls++;
     
     try {
@@ -898,8 +990,20 @@ async function runUltimateAutoPilot() {
         linkCount,
         subsidyLinkCount,
         pdfStats,
+        statusCode,
+        isRedirected,
       } = await fetchPageTextDynamic(url);
-      const canonicalUrl = fetchedUrl || normalizeUrl(url);
+      const canonicalUrl = fetchedUrl || normalizeFetchUrl(url);
+      entry.fetch_url = entry.fetch_url || url;
+      entry.original_url = entry.original_url || entry.fetch_url;
+      entry.final_url = canonicalUrl;
+      entry.status_code = statusCode;
+      entry.is_redirected = isRedirected;
+      if (entry.depth === 0) {
+        currentSeedStats.final_url = canonicalUrl;
+        currentSeedStats.status_code = statusCode || '';
+        currentSeedStats.is_redirected = Boolean(isRedirected);
+      }
 
       if (isPdf) {
         stats.parsed_pdf++;
@@ -1368,6 +1472,18 @@ async function runUltimateAutoPilot() {
       }
 
     } catch (err) { 
+      if (err.statusCode) {
+        entry.status_code = err.statusCode;
+        entry.fetch_url = err.fetchUrl || entry.fetch_url || entry.url;
+        entry.final_url = err.finalUrl || '';
+        entry.is_redirected = Boolean(entry.final_url && normalizeFetchUrl(entry.final_url) !== normalizeFetchUrl(entry.fetch_url));
+        if (entry.depth === 0) {
+          currentSeedStats.fetch_url = entry.fetch_url;
+          currentSeedStats.final_url = entry.final_url;
+          currentSeedStats.status_code = entry.status_code;
+          currentSeedStats.is_redirected = entry.is_redirected;
+        }
+      }
       if (String(err.message).includes('NO_RETRY')) {
          console.log(`  ⏭️ スキップ: ${err.message}`);
          candidateLogs.push(
@@ -1424,7 +1540,7 @@ async function runUltimateAutoPilot() {
     console.log('🌱 Seed summary:');
     for (const row of seedStats.values()) {
       console.log(
-        `  - ${row.seed_url}: attempted=${row.attempted_urls}, skipped=${row.skipped_urls}, errors=${row.error_urls}, 404=${row.not_found_urls}, already_existing=${row.already_existing_urls}, save_candidates=${row.save_candidates}, inserted=${row.inserted}, updated=${row.updated}, extracted_links=${row.extracted_links}, external_candidates=${row.external_candidates}`
+        `  - ${row.seed_url}: original_url=${row.original_url}, fetch_url=${row.fetch_url}, final_url=${row.final_url || '-'}, status_code=${row.status_code || '-'}, is_redirected=${row.is_redirected}, attempted=${row.attempted_urls}, skipped=${row.skipped_urls}, errors=${row.error_urls}, 404=${row.not_found_urls}, already_existing=${row.already_existing_urls}, save_candidates=${row.save_candidates}, inserted=${row.inserted}, updated=${row.updated}, extracted_links=${row.extracted_links}, external_candidates=${row.external_candidates}`
       );
     }
   }
