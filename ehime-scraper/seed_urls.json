@@ -22,5 +22,10 @@
   "伊方町": ["https://www.town.ikata.ehime.jp/life/3/"],
   "松野町": ["https://www.town.matsuno.ehime.jp/life/3/"],
   "鬼北町": ["https://www.town.kihoku.ehime.jp/life/3/"],
-  "愛南町": ["https://www.town.ainan.ehime.jp/kurashi/mokuteki/josei/"]
+  "愛南町": ["https://www.town.ainan.ehime.jp/kurashi/mokuteki/josei/"],
+  "外部支援機関": [
+    "https://www.iyoplan.jp/ehimeled/",
+    "https://bp-ehime.or.jp/sk/",
+    "https://ehime-sci.jp/shueki2026/"
+  ]
 }
