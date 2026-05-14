@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const fetch = global.fetch || require('node-fetch');
 
 const originalWarn = console.warn;
@@ -169,7 +170,9 @@ function normalizeUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
     u.hash = '';
-    ['utm_source', 'utm_medium', 'utm_campaign'].forEach(p => u.searchParams.delete(p));
+    [...u.searchParams.keys()].forEach((p) => {
+      if (/^utm_/i.test(p) || /^(fbclid|gclid|yclid)$/i.test(p)) u.searchParams.delete(p);
+    });
     return u.toString().replace(/\/$/, '');
   } catch (e) { return rawUrl; }
 }
@@ -185,6 +188,33 @@ function normalizeFetchUrl(rawUrl) {
 
 function normalizeUrlKey(rawUrl) {
   return normalizeUrl(rawUrl);
+}
+
+function normalizeOfficialUrlForSourceId(rawUrl) {
+  return normalizeUrl(rawUrl);
+}
+
+function createOfficialSiteSourceExternalId(officialUrl, sourceUrl = '') {
+  const normalizedOfficialUrl = normalizeOfficialUrlForSourceId(officialUrl || sourceUrl);
+  if (!normalizedOfficialUrl) {
+    return {
+      sourceType: '',
+      sourceExternalId: '',
+      normalizedOfficialUrl: '',
+    };
+  }
+
+  const hash = crypto
+    .createHash('sha256')
+    .update(normalizedOfficialUrl)
+    .digest('hex')
+    .slice(0, 32);
+
+  return {
+    sourceType: 'official_site',
+    sourceExternalId: `official_site:${hash}`,
+    normalizedOfficialUrl,
+  };
 }
 
 function resolveUrlMaybeRelative(rawUrl, baseUrl) {
@@ -757,15 +787,91 @@ function isBadApplicationPeriod(value, parsedData = {}) {
   if (!text) return false;
   const title = String(parsedData.title || '').trim();
   if (title && text === title) return true;
+  if (title && text.includes(title) && text.length <= title.length + 20) return true;
   if (/^(申請期間|受付期間|募集期間|対象者|対象経費|補助率|上限金額)$/.test(text)) return true;
   if (text.length <= 8 && /期間|対象|概要|詳細/.test(text)) return true;
-  if (/補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童/.test(text)) {
+  if (
+    /補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童|対象となる支出|支出が対象|対象経費|申請方法|交付要綱/.test(text)
+  ) {
     return true;
   }
+  if (/^受付終了$|^募集終了$|^終了しました$/.test(text)) return true;
   if (/補助金|助成金|支援事業/.test(text) && !/\d{4}|令和|平成|月|日|随時|終了/.test(text)) {
     return true;
   }
+  if (!isApplicationPeriodLike(text)) return true;
   return false;
+}
+
+function isApplicationPeriodLike(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '不明') return false;
+  return /(\d{4}年|\d{4}[-/]\d{1,2}|令和\d+年|平成\d+年|[一二三四五六七八九十元0-9]+月[0-9一二三四五六七八九十]+日|随時募集|随時受付|予算(?:額)?に達|予算上限|受付期間|募集期間|申請期限|締切|まで|通年)/.test(
+    text
+  );
+}
+
+function sanitizeApplicationPeriodText(value, parsedData = {}) {
+  if (isBadApplicationPeriod(value, parsedData)) {
+    return '公式ページをご確認ください';
+  }
+  return String(value || '').trim();
+}
+
+function japaneseEraFiscalYearToWestern(era, yearText) {
+  const year = yearText === '元' ? 1 : Number(yearText);
+  if (!Number.isFinite(year) || year <= 0) return null;
+  if (era === '令和') return 2018 + year;
+  if (era === '平成') return 1988 + year;
+  return null;
+}
+
+function extractFiscalYears(text = '') {
+  const value = String(text || '');
+  const years = new Set();
+
+  for (const match of value.matchAll(/(令和|平成)(元|\d{1,2})年度/g)) {
+    const western = japaneseEraFiscalYearToWestern(match[1], match[2]);
+    if (western) years.add(western);
+  }
+
+  for (const match of value.matchAll(/(20\d{2})年度/g)) {
+    years.add(Number(match[1]));
+  }
+
+  return [...years].filter((year) => Number.isFinite(year));
+}
+
+function analyzeOldClosedFiscalYear(parsedData = {}, pageText = '') {
+  const title = String(parsedData.title || '');
+  const applicationStatus = String(parsedData.application_status || '');
+  const periodText = String(parsedData.application_period_text || '');
+  const fiscalYearText = String(parsedData.fiscal_year || '');
+  const summary = String(parsedData.summary || '');
+  const excerpt = String(parsedData.raw_excerpt || '');
+  const focusedHaystack = `${title}\n${periodText}\n${fiscalYearText}\n${summary}\n${excerpt}`;
+  const pageHaystack = `${focusedHaystack}\n${String(pageText || '').slice(0, 5000)}`;
+  const fiscalYears = extractFiscalYears(focusedHaystack);
+  const currentFiscalYear = currentMonth >= 4 ? currentYear : currentYear - 1;
+  const oldestFiscalYear = fiscalYears.length > 0 ? Math.min(...fiscalYears) : null;
+  const hasOldFiscalYear = fiscalYears.some((year) => currentFiscalYear - year >= 2);
+  const isClosed =
+    /受付終了|募集終了|終了しました|終了いたしました|公募終了|申請受付を終了/.test(pageHaystack) ||
+    /受付終了|募集終了|終了/.test(applicationStatus);
+  const hasCurrentSignal =
+    /現在募集中|随時募集|随時受付|受付中|募集中/.test(focusedHaystack) ||
+    fiscalYears.some((year) => year >= currentFiscalYear);
+  const shouldSkip = Boolean(hasOldFiscalYear && isClosed && !hasCurrentSignal);
+
+  return {
+    shouldSkip,
+    fiscal_years: fiscalYears,
+    current_fiscal_year: currentFiscalYear,
+    oldest_fiscal_year: oldestFiscalYear,
+    is_closed: isClosed,
+    has_current_signal: hasCurrentSignal,
+    reason: shouldSkip ? 'old_closed_fiscal_year' : '',
+  };
 }
 
 function pickKnownSubsidyColumns(row) {
@@ -792,6 +898,8 @@ function pickKnownSubsidyColumns(row) {
     'crawl_status',
     'is_active',
     'source_url',
+    'source_type',
+    'source_external_id',
     'dedupe_key',
   ];
 
@@ -821,6 +929,10 @@ function buildCandidateLog({
   officialUrlDecision = '',
   skippedReason = '',
   extractedLinksCount = 0,
+  sourceType = '',
+  sourceExternalId = '',
+  normalizedOfficialUrl = '',
+  oldFiscalYearCheck = null,
 }) {
   return {
     seed_url: entry?.seed_url || '',
@@ -843,6 +955,10 @@ function buildCandidateLog({
     official_url_decision: officialUrlDecision,
     skipped_reason: skippedReason,
     extracted_links_count: extractedLinksCount,
+    source_type: sourceType,
+    source_external_id: sourceExternalId,
+    normalized_official_url: normalizedOfficialUrl,
+    old_fiscal_year_check: oldFiscalYearCheck,
     is_jgrants_url: isJgrantsUrl(entry?.url || ''),
   };
 }
@@ -1315,8 +1431,9 @@ async function runUltimateAutoPilot() {
         continue;
       }
 
-      if (isBadApplicationPeriod(parsedData.application_period_text, parsedData)) {
-        console.log(`  ⏭️ 申請期間が見出し値の可能性があるため保存しません`);
+      const oldFiscalYearCheck = analyzeOldClosedFiscalYear(parsedData, rawText);
+      if (oldFiscalYearCheck.shouldSkip) {
+        console.log(`  ⏭️ 古い年度の受付終了ページのため保存しません`);
         candidateLogs.push(
           buildCandidateLog({
             entry,
@@ -1324,7 +1441,8 @@ async function runUltimateAutoPilot() {
             title: parsedData.title || title,
             score,
             action: 'skip',
-            skippedReason: 'application_period_text が見出し値の可能性',
+            skippedReason: oldFiscalYearCheck.reason,
+            oldFiscalYearCheck,
           })
         );
         stats.reject++;
@@ -1333,12 +1451,25 @@ async function runUltimateAutoPilot() {
         continue;
       }
 
+      const sanitizedApplicationPeriodText = sanitizeApplicationPeriodText(
+        parsedData.application_period_text,
+        parsedData
+      );
+      if (sanitizedApplicationPeriodText !== parsedData.application_period_text) {
+        console.log(`  🧹 申請期間を安全化: ${sanitizedApplicationPeriodText}`);
+        parsedData = {
+          ...parsedData,
+          application_period_text: sanitizedApplicationPeriodText,
+        };
+      }
+
       const officialDecision = decideOfficialUrl({
         pageType,
         sourceUrl: canonicalUrl,
         extractedOfficialUrl,
       });
       const safeOfficialUrl = officialDecision.officialUrl;
+      const sourceIdentity = createOfficialSiteSourceExternalId(safeOfficialUrl, canonicalUrl);
 
       if (
         !safeOfficialUrl ||
@@ -1356,12 +1487,52 @@ async function runUltimateAutoPilot() {
             action: 'skip',
             officialUrlDecision: officialDecision.reason,
             skippedReason: 'official_url が個別制度ページではない',
+            sourceType: sourceIdentity.sourceType,
+            sourceExternalId: sourceIdentity.sourceExternalId,
+            normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
+            oldFiscalYearCheck,
           })
         );
         stats.reject++;
         stats.skipped_urls++;
         currentSeedStats.skipped_urls++;
         continue;
+      }
+
+      if (sourceIdentity.sourceExternalId) {
+        const { data: existingBySourceRows, error: sourceIdErr } = await supabase
+          .from('subsidies')
+          .select('id')
+          .eq('source_type', sourceIdentity.sourceType)
+          .eq('source_external_id', sourceIdentity.sourceExternalId)
+          .limit(1);
+
+        if (sourceIdErr) throw new Error(`source_external_id確認エラー: ${sourceIdErr.message}`);
+
+        if (existingBySourceRows && existingBySourceRows.length > 0) {
+          console.log(`  ⏭️ source_external_id登録済みスキップ`);
+          candidateLogs.push(
+            buildCandidateLog({
+              entry,
+              pageType,
+              title: parsedData.title || title,
+              score,
+              action: 'skip',
+              officialUrlDecision: officialDecision.reason,
+              skippedReason: 'source_external_id登録済み',
+              sourceType: sourceIdentity.sourceType,
+              sourceExternalId: sourceIdentity.sourceExternalId,
+              normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
+              oldFiscalYearCheck,
+            })
+          );
+          stats.reject++;
+          stats.skipped_urls++;
+          stats.already_existing_urls++;
+          currentSeedStats.skipped_urls++;
+          currentSeedStats.already_existing_urls++;
+          continue;
+        }
       }
 
       const { data: existingByOfficialUrlRows, error: officialUrlErr } = await supabase
@@ -1383,6 +1554,10 @@ async function runUltimateAutoPilot() {
             action: 'skip',
             officialUrlDecision: officialDecision.reason,
             skippedReason: 'official_url登録済み',
+            sourceType: sourceIdentity.sourceType,
+            sourceExternalId: sourceIdentity.sourceExternalId,
+            normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
+            oldFiscalYearCheck,
           })
         );
         stats.reject++;
@@ -1414,6 +1589,10 @@ async function runUltimateAutoPilot() {
             action: 'skip',
             officialUrlDecision: officialDecision.reason,
             skippedReason: 'dedupe_key登録済み',
+            sourceType: sourceIdentity.sourceType,
+            sourceExternalId: sourceIdentity.sourceExternalId,
+            normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
+            oldFiscalYearCheck,
           })
         );
         stats.reject++;
@@ -1423,6 +1602,9 @@ async function runUltimateAutoPilot() {
       }
 
       console.log(`  ✨ 結果: ${parsedData.title} (ステータス:${parsedData.application_status})`);
+      if (sourceIdentity.sourceExternalId) {
+        console.log(`  🧾 source: ${sourceIdentity.sourceType} / ${sourceIdentity.sourceExternalId}`);
+      }
 
       const { is_subsidy, confidence, raw_excerpt, official_url, fiscal_year, ...dbData } = parsedData;
 
@@ -1432,14 +1614,21 @@ async function runUltimateAutoPilot() {
         application_end_date: normalizeDate(dbData.application_end_date),
       };
       
-      const insertRow = sanitizeSubsidyRow(pickKnownSubsidyColumns({ 
+      const insertPayload = { 
         ...normalizedDbData, 
         official_url: safeOfficialUrl, 
         dedupe_key: dedupeKey,
         crawl_status: 'draft', 
         is_active: false, 
-        source_url: canonicalUrl 
-      }));
+        source_url: canonicalUrl,
+      };
+
+      if (sourceIdentity.sourceType && sourceIdentity.sourceExternalId) {
+        insertPayload.source_type = sourceIdentity.sourceType;
+        insertPayload.source_external_id = sourceIdentity.sourceExternalId;
+      }
+
+      const insertRow = sanitizeSubsidyRow(pickKnownSubsidyColumns(insertPayload));
 
       candidateLogs.push(
         buildCandidateLog({
@@ -1449,6 +1638,10 @@ async function runUltimateAutoPilot() {
           score,
           action: CONFIG.dryRun ? 'dry_run_save_candidate' : 'save',
           officialUrlDecision: officialDecision.reason,
+          sourceType: sourceIdentity.sourceType,
+          sourceExternalId: sourceIdentity.sourceExternalId,
+          normalizedOfficialUrl: sourceIdentity.normalizedOfficialUrl,
+          oldFiscalYearCheck,
         })
       );
 
