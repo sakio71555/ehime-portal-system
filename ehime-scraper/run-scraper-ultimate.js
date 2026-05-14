@@ -677,7 +677,7 @@ async function extractFullWithAI(text, sourceUrl) {
 【抽出・正規化ルール（重要）】
 1. application_status: 記事から読み取れる公募状況を「公募中」「受付終了」「予告」「不明」等で出力。
 2. official_url: 記事内に記載されている公式な公募ページや詳細ページのURL。見つからなければ空文字。
-3. amount_max_yen: 金額の上限が分かる場合は「半角数字のみ」で出力（例: 50万円 -> 500000）。不明なら 0。
+3. amount_max_yen: 金額の上限が分かる場合は「半角数字のみ」で出力（例: 50万円 -> 500000）。不明なら 0（保存時に null へ安全化します）。
 4. application_start_date / application_end_date: 判明している場合は YYYY-MM-DD 形式。不明なら空文字 "" にすること。
 5. purposes / industries / tags: [既存リスト]にない場合はテキストから具体的なキーワードを抽出し、要素ごとの文字列配列 ["単語1", "単語2"] にすること。
 6. target_entities_arr / target_expenses_arr: 箇条書きや文章から対象となる「事業者/個人」や「経費名」を抽出し、配列 ["法人", "個人事業主"] のようにすること。
@@ -791,7 +791,7 @@ function isBadApplicationPeriod(value, parsedData = {}) {
   if (/^(申請期間|受付期間|募集期間|対象者|対象経費|補助率|上限金額)$/.test(text)) return true;
   if (text.length <= 8 && /期間|対象|概要|詳細/.test(text)) return true;
   if (
-    /補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童|対象となる支出|支出が対象|対象経費|申請方法|交付要綱/.test(text)
+    /補助金・助成金一覧|事業者向け支援制度|支援制度一覧|更新日|お知らせ|忘れない|児童手当|対象児童|対象となる支出|支出が対象|対象経費|申請方法|交付要綱|制度概要/.test(text)
   ) {
     return true;
   }

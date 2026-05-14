@@ -1,11 +1,18 @@
 const path = require('path');
 
 const INCLUDE_LINK_KEYWORDS = [
+  '補助',
+  '助成',
   '補助金',
   '助成金',
+  '医療費助成',
+  '住宅改修助成',
+  '旅客運賃助成',
   '支援金',
   '奨励金',
   '支援事業',
+  '助成事業',
+  '補助事業',
   '公募',
   '募集',
   '交付金',
@@ -43,13 +50,23 @@ const EXCLUDE_LINK_KEYWORDS = [
   'jgrants',
 ];
 
+const ASSISTANCE_SIGNAL_PATTERN =
+  /補助金|助成金|補助事業|助成事業|補助制度|助成制度|支援金|給付金|奨励金|交付金|利子補給|医療費助成|住宅改修助成|旅客運賃助成|補助|助成/;
+
+const PERSONAL_ASSISTANCE_PATTERN =
+  /母子保健|不妊治療|妊産婦|医療費助成|先進医療|子ども医療|こども医療|住宅改修|移住|定住|空き家|離島|旅客運賃助成|高齢者|障がい者|障害者|福祉/;
+
 const DETAIL_SIGNAL_PATTERNS = [
   /申請期間/,
   /受付期間/,
   /募集期間/,
   /対象経費/,
+  /助成対象/,
+  /補助対象/,
   /補助率/,
   /補助上限/,
+  /助成額/,
+  /補助額/,
   /上限(?:額)?/,
   /対象者/,
   /対象事業/,
@@ -115,8 +132,6 @@ const GUIDELINE_PDF_PATTERNS = [
   /交付要綱/,
   /実施要領/,
   /制度案内/,
-  /補助金/,
-  /助成金/,
 ];
 
 function normalizeUrl(rawUrl) {
@@ -156,6 +171,10 @@ function countMatches(text, patterns) {
 function includesKeyword(haystack, keywords) {
   const value = String(haystack || '');
   return keywords.some((keyword) => value.includes(keyword));
+}
+
+function hasAssistanceSignal(text = '') {
+  return ASSISTANCE_SIGNAL_PATTERN.test(String(text || ''));
 }
 
 function normalizeLinkText(text = '') {
@@ -219,10 +238,18 @@ function getDetailSignalCount(text) {
 }
 
 function isApplicationFormPage({ url = '', title = '', text = '' } = {}) {
-  const haystack = `${title}\n${url}\n${String(text || '').slice(0, 1200)}`;
-  const hasFormSignal = countMatches(haystack, APPLICATION_FORM_PATTERNS) >= 1;
+  const titleUrl = `${title}\n${url}`;
+  const textHead = String(text || '').slice(0, 1200);
+  const haystack = `${titleUrl}\n${textHead}`;
+  const hasFormSignalInTitleUrl = countMatches(titleUrl, APPLICATION_FORM_PATTERNS) >= 1;
+  const hasFormSignal = hasFormSignalInTitleUrl || countMatches(textHead, APPLICATION_FORM_PATTERNS) >= 1;
   const hasGuidelineSignal = countMatches(haystack, GUIDELINE_PDF_PATTERNS) >= 1;
-  return hasFormSignal && !hasGuidelineSignal;
+  const detailSignalCount = getDetailSignalCount(text);
+  const titleHasAssistanceSignal = hasAssistanceSignal(title);
+
+  if (hasFormSignalInTitleUrl && !hasGuidelineSignal) return true;
+  if (hasFormSignal && titleHasAssistanceSignal) return false;
+  return hasFormSignal && !hasGuidelineSignal && detailSignalCount === 0;
 }
 
 function isGenericIndexTitle(title = '') {
@@ -241,7 +268,7 @@ function isLikelyIndexPage({
   const detailSignals = getDetailSignalCount(text);
   const normalizedUrl = normalizeUrl(url).toLowerCase();
   const detailLikeHtmlUrl = /\.html?$/i.test(normalizedUrl) && !/\/index\.html?$/i.test(normalizedUrl);
-  const titleHasSubsidySignal = /補助金|助成金|支援金|奨励金|交付金|支援事業/.test(title);
+  const titleHasSubsidySignal = hasAssistanceSignal(title);
   const indexLikeUrl =
     /\/(?:index\.html?|hojokin|josei|sangyou|sangyo|shien|life\/\d+|theme\d+)(?:\/)?$/i.test(
       normalizedUrl
@@ -265,27 +292,42 @@ function isLikelyIndexPage({
 function scoreCandidate({ url = '', title = '', text = '', linkCount = 0, pageType = 'unknown' } = {}) {
   const haystack = `${title}\n${url}\n${String(text || '').slice(0, 5000)}`;
   let score = 0;
+  const strongAssistanceSignal = hasAssistanceSignal(haystack);
 
-  if (/補助金/.test(title)) score += 5;
-  if (/助成金/.test(title)) score += 5;
-  if (/支援事業/.test(title)) score += 4;
+  if (/補助金/.test(title)) score += 8;
+  if (/助成金/.test(title)) score += 8;
+  if (/助成/.test(title)) score += 8;
+  if (/補助/.test(title)) score += 8;
+  if (/支援事業/.test(title)) score += 6;
+  if (/助成事業/.test(title)) score += 6;
+  if (/補助事業/.test(title)) score += 6;
   if (/公募/.test(title)) score += 4;
+  if (/医療費助成/.test(title)) score += 5;
+  if (/住宅改修助成/.test(title)) score += 5;
+  if (/移住/.test(title)) score += 5;
+  if (/定住/.test(title)) score += 5;
+  if (/空き家/.test(title)) score += 5;
   if (/hojokin/i.test(url)) score += 3;
   if (/josei/i.test(url)) score += 3;
   if (/shien/i.test(url)) score += 3;
+  if (/対象者/.test(haystack)) score += 4;
+  if (/助成対象/.test(haystack)) score += 4;
+  if (/補助対象/.test(haystack)) score += 4;
   if (/対象経費/.test(haystack)) score += 3;
   if (/補助率/.test(haystack)) score += 3;
-  if (/申請期間|受付期間|募集期間/.test(haystack)) score += 3;
+  if (/申請期間|受付期間|募集期間/.test(haystack)) score += 4;
+  if (/助成額/.test(haystack)) score += 4;
+  if (/補助額/.test(haystack)) score += 4;
   if (/上限/.test(haystack)) score += 3;
   if (isPdfUrl(url) && /募集要項/.test(haystack)) score += 2;
   if (isPdfUrl(url) && /公募要領/.test(haystack)) score += 2;
 
   if (/一覧/.test(title)) score -= 8;
   if (/リンク集/.test(title)) score -= 8;
-  if (/制度案内/.test(title)) score -= 8;
-  if (/認定申請/.test(title)) score -= 8;
-  if (/児童手当/.test(title)) score -= 8;
-  if (/介護保険/.test(title)) score -= 8;
+  if (/制度案内/.test(title) && !strongAssistanceSignal) score -= 10;
+  if (/認定申請/.test(title) && !strongAssistanceSignal) score -= 15;
+  if (/児童手当/.test(title) && !strongAssistanceSignal) score -= 15;
+  if (/介護保険|保険制度/.test(title) && !strongAssistanceSignal) score -= 15;
   if (/モニター募集/.test(title)) score -= 8;
   if (isJgrantsUrl(url) || /jgrants-portal\.go\.jp/.test(haystack)) score -= 8;
   if (/\/index\.html?$/i.test(url)) score -= 5;
@@ -315,10 +357,18 @@ function scoreLinkCandidate({
   const penalties = [];
   let score = 0;
 
+  score += addScore(/補助(?!者|員|職員|事務|業務|作業)/.test(normalizedText), 8, 'link_text:補助 +8', reasons, penalties);
+  score += addScore(/助成/.test(normalizedText), 8, 'link_text:助成 +8', reasons, penalties);
   score += addScore(/補助金/.test(normalizedText), 8, 'link_text:補助金 +8', reasons, penalties);
-  score += addScore(/【補助】|補助します/.test(normalizedText), 4, 'link_text:補助 +4', reasons, penalties);
   score += addScore(/助成金/.test(normalizedText), 8, 'link_text:助成金 +8', reasons, penalties);
   score += addScore(/支援事業/.test(normalizedText), 6, 'link_text:支援事業 +6', reasons, penalties);
+  score += addScore(/助成事業/.test(normalizedText), 6, 'link_text:助成事業 +6', reasons, penalties);
+  score += addScore(/補助事業/.test(normalizedText), 6, 'link_text:補助事業 +6', reasons, penalties);
+  score += addScore(/医療費助成/.test(normalizedText), 5, 'link_text:医療費助成 +5', reasons, penalties);
+  score += addScore(/住宅改修助成/.test(normalizedText), 5, 'link_text:住宅改修助成 +5', reasons, penalties);
+  score += addScore(/移住/.test(normalizedText), 5, 'link_text:移住 +5', reasons, penalties);
+  score += addScore(/定住/.test(normalizedText), 5, 'link_text:定住 +5', reasons, penalties);
+  score += addScore(/空き家/.test(normalizedText), 5, 'link_text:空き家 +5', reasons, penalties);
   score += addScore(/支援金/.test(normalizedText), 5, 'link_text:支援金 +5', reasons, penalties);
   score += addScore(/奨励金/.test(normalizedText), 5, 'link_text:奨励金 +5', reasons, penalties);
   score += addScore(/公募/.test(normalizedText), 5, 'link_text:公募 +5', reasons, penalties);
@@ -354,7 +404,7 @@ function scoreLinkCandidate({
   score += addScore(/創業/.test(normalizedHeading), 3, 'parent_heading:創業 +3', reasons, penalties);
   score += addScore(/支援制度/.test(normalizedHeading), 3, 'parent_heading:支援制度 +3', reasons, penalties);
 
-  const strongSubsidyText = /補助金|助成金|支援金|奨励金|交付金|支援事業/.test(normalizedText);
+  const strongSubsidyText = hasAssistanceSignal(normalizedText) && !/事務補助|業務補助|作業補助/.test(normalizedText);
   score += addScore(/暮らし/.test(normalizedHeading), -2, 'parent_heading:暮らし -2', reasons, penalties);
   score += addScore(/税/.test(normalizedHeading), -4, 'parent_heading:税 -4', reasons, penalties);
   score += addScore(/戸籍/.test(normalizedHeading), -4, 'parent_heading:戸籍 -4', reasons, penalties);
@@ -370,14 +420,16 @@ function scoreLinkCandidate({
   score += addScore(/申請書/.test(normalizedText), -10, 'link_text:申請書 -10', reasons, penalties);
   score += addScore(/様式/.test(normalizedText), -10, 'link_text:様式 -10', reasons, penalties);
   score += addScore(/記入例/.test(normalizedText), -10, 'link_text:記入例 -10', reasons, penalties);
-  score += addScore(/認定申請/.test(normalizedText), -10, 'link_text:認定申請 -10', reasons, penalties);
-  score += addScore(/手当/.test(normalizedText) && !strongSubsidyText, -10, 'link_text:手当 -10', reasons, penalties);
-  score += addScore(/児童手当/.test(normalizedText), -10, 'link_text:児童手当 -10', reasons, penalties);
-  score += addScore(/介護保険/.test(normalizedText), -10, 'link_text:介護保険 -10', reasons, penalties);
+  score += addScore(/認定申請/.test(normalizedText) && !strongSubsidyText, -15, 'link_text:認定申請のみ -15', reasons, penalties);
+  score += addScore(/手当/.test(normalizedText) && !strongSubsidyText, -15, 'link_text:手当のみ -15', reasons, penalties);
+  score += addScore(/児童手当/.test(normalizedText) && !strongSubsidyText, -15, 'link_text:児童手当のみ -15', reasons, penalties);
+  score += addScore(/介護保険|保険制度/.test(normalizedText) && !strongSubsidyText, -15, 'link_text:保険制度のみ -15', reasons, penalties);
   score += addScore(/入札/.test(normalizedText), -10, 'link_text:入札 -10', reasons, penalties);
   score += addScore(/契約/.test(normalizedText), -10, 'link_text:契約 -10', reasons, penalties);
-  score += addScore(/職員採用/.test(normalizedText), -10, 'link_text:職員採用 -10', reasons, penalties);
+  score += addScore(/職員採用|会計年度任用職員|職員/.test(normalizedText) && !strongSubsidyText, -10, 'link_text:職員募集 -10', reasons, penalties);
   score += addScore(/パブリックコメント/.test(normalizedText), -10, 'link_text:パブリックコメント -10', reasons, penalties);
+  score += addScore(/統計/.test(normalizedText) && !strongSubsidyText, -10, 'link_text:統計 -10', reasons, penalties);
+  score += addScore(/取消|取り消し|取り消しました/.test(normalizedText), -30, 'link_text:取消 -30', reasons, penalties);
   score += addScore(/受付終了|募集終了/.test(normalizedText), -6, 'link_text:受付終了 -6', reasons, penalties);
   score += addScore(/報告|策定しました/.test(normalizedText), -8, 'link_text:報告/策定 -8', reasons, penalties);
   score += addScore(/融資制度/.test(normalizedText) && !/利子補給|補助/.test(normalizedText), -6, 'link_text:融資制度のみ -6', reasons, penalties);
@@ -409,7 +461,7 @@ function scoreLinkCandidate({
   );
 
   const hasPositiveSignal = reasons.length > 0 && score > -10;
-  const hasSubsidySignal = /補助|助成|支援|公募|募集|交付/.test(haystack) || /hojo|josei|shien/i.test(url);
+  const hasSubsidySignal = hasAssistanceSignal(haystack) || /支援|公募|募集|交付/.test(haystack) || /hojo|josei|shien/i.test(url);
 
   return {
     score,
@@ -442,17 +494,23 @@ function classifyPage(page = {}) {
   }
 
   if (isApplicationFormPage(page)) return 'application_form';
-  if (NOISE_PATTERNS.some((pattern) => pattern.test(`${title}\n${url}`))) return 'noise_page';
+  if (NOISE_PATTERNS.some((pattern) => pattern.test(`${title}\n${url}`)) && !hasAssistanceSignal(haystack)) {
+    return 'noise_page';
+  }
+
+  if (PERSONAL_ASSISTANCE_PATTERN.test(haystack) && hasAssistanceSignal(haystack)) {
+    return 'personal_assistance';
+  }
 
   if (
     /\.html?$/i.test(url) &&
     /hojo|hojokin|josei|shien/i.test(url) &&
-    (getDetailSignalCount(text) >= 1 || /補助|助成|支援/.test(haystack))
+    (getDetailSignalCount(text) >= 1 || hasAssistanceSignal(haystack) || /支援/.test(haystack))
   ) {
     return 'subsidy_detail';
   }
 
-  if (getDetailSignalCount(text) >= 2 && /補助金|助成金|支援金|奨励金|交付金|支援事業/.test(haystack)) {
+  if (getDetailSignalCount(text) >= 2 && hasAssistanceSignal(haystack)) {
     return 'subsidy_detail';
   }
 
@@ -480,7 +538,8 @@ function extractCandidateLinksFromIndexPage({ links = [], seed = null } = {}) {
     });
     const haystack = `${text} ${link.parentHeading || ''} ${url}`;
     const hasKeyword = includesKeyword(haystack, INCLUDE_LINK_KEYWORDS);
-    const hasExcludedKeyword = includesKeyword(haystack, EXCLUDE_LINK_KEYWORDS);
+    const hasStrongAssistanceSignal = hasAssistanceSignal(haystack);
+    const hasExcludedKeyword = includesKeyword(haystack, EXCLUDE_LINK_KEYWORDS) && !hasStrongAssistanceSignal;
 
     if (!hasKeyword && !scored.hasSubsidySignal && scored.score < 5) return;
 
@@ -502,7 +561,7 @@ function extractCandidateLinksFromIndexPage({ links = [], seed = null } = {}) {
       isLikelyFooter: Boolean(link.isLikelyFooter),
       isLikelyBreadcrumb: Boolean(link.isLikelyBreadcrumb),
       shouldCrawl:
-        scored.score >= 8 &&
+        (hasExcludedKeyword ? Math.min(scored.score, 0) : scored.score) >= 8 &&
         isSameDomain &&
         !hasExcludedKeyword &&
         !isJgrantsUrl(url) &&
@@ -523,7 +582,7 @@ function getUrlBasename(url) {
 }
 
 function decideOfficialUrl({ pageType, sourceUrl, extractedOfficialUrl = '' } = {}) {
-  if (pageType === 'subsidy_detail' || pageType === 'pdf_guideline') {
+  if (pageType === 'subsidy_detail' || pageType === 'personal_assistance' || pageType === 'pdf_guideline') {
     return { officialUrl: normalizeUrl(sourceUrl), reason: `${pageType}: source_urlを公式URLに採用` };
   }
 

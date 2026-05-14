@@ -1,11 +1,11 @@
 const POSTGRES_INT4_MAX = 2147483647;
 
 function normalizeAmountMaxYen(value) {
-  if (value === null || value === undefined || value === '') return 0;
+  if (value === null || value === undefined || value === '') return null;
 
   const amount = Number(value);
 
-  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (!Number.isFinite(amount) || amount <= 0) return null;
   if (amount > POSTGRES_INT4_MAX) return null;
 
   return Math.trunc(amount);
