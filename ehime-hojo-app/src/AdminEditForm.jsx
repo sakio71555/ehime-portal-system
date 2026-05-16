@@ -72,6 +72,10 @@ function buildInitialEditForm(initialData) {
 
     crawl_status: data.crawl_status || 'draft',
     is_active: Boolean(data.is_active),
+
+    admin_note: data.admin_note || '',
+    duplicate_of_id: data.duplicate_of_id || '',
+    duplicate_reason: data.duplicate_reason || '',
   });
 }
 
@@ -844,6 +848,7 @@ function inferIndustryTagsFromForm(form) {
 
 function buildSubsidyUpdatePayload(form) {
   const fixed = forceApplicationStatusByPeriod(form);
+  const duplicateOfIdText = String(fixed.duplicate_of_id || '').trim();
 
   return {
     title: fixed.title,
@@ -884,6 +889,12 @@ function buildSubsidyUpdatePayload(form) {
 
     source_type: fixed.source_type || null,
     source_external_id: fixed.source_external_id || null,
+
+    admin_note: fixed.admin_note || null,
+    duplicate_of_id: /^\d+$/.test(duplicateOfIdText)
+      ? Number(duplicateOfIdText)
+      : null,
+    duplicate_reason: fixed.duplicate_reason || null,
   };
 }
 

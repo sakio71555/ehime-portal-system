@@ -35,6 +35,28 @@ const getMissingFields = (item) => {
   return missing;
 };
 
+const hasAdminReviewNote = (item) =>
+  Boolean(item?.admin_note || item?.duplicate_of_id || item?.duplicate_reason);
+
+const AdminReviewNotice = ({ item }) => {
+  if (!hasAdminReviewNote(item)) return null;
+
+  return (
+    <div style={adminReviewNoticeStyle}>
+      <div style={{ fontWeight: 'bold', color: '#92400e', marginBottom: '4px' }}>
+        ⚠ 重複候補・非公開理由あり
+      </div>
+      {item.duplicate_of_id && (
+        <div>
+          正データID: <strong>{item.duplicate_of_id}</strong>
+        </div>
+      )}
+      {item.duplicate_reason && <div>理由: {item.duplicate_reason}</div>}
+      {item.admin_note && <div>メモ: {item.admin_note}</div>}
+    </div>
+  );
+};
+
 export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVisibility, onArchive, onRestore }) {
   const missingFields = getMissingFields(item);
   
@@ -46,7 +68,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
   if (tab === 'drafts') {
     return (
       <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-        <div>
+        <div style={{ flex: 1, paddingRight: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
             <span style={{ backgroundColor: '#fef3c7', color: '#d97706', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>未確認</span>
             
@@ -71,6 +93,8 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
               ))}
             </div>
           )}
+
+          <AdminReviewNotice item={item} />
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button onClick={onDelete} style={{ backgroundColor: '#fee2e2', color: '#dc2626', padding: '10px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', border: 'none' }}>削除</button>
@@ -103,6 +127,8 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             <span>💰 {item.amount_text || item.amount || '不明'}</span>
             <span>⏰ 締切: {item.application_period_text || item.deadline || '不明'}</span>
           </div>
+
+          {!item.is_active && <AdminReviewNotice item={item} />}
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -143,6 +169,8 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
           <span>💰 {item.amount_text || item.amount || '不明'}</span>
           <span>⏰ 元の締切: {item.application_period_text || item.deadline || '不明'}</span>
         </div>
+
+        <AdminReviewNotice item={item} />
       </div>
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -152,3 +180,15 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
     </div>
   );
 }
+
+const adminReviewNoticeStyle = {
+  backgroundColor: '#fffbeb',
+  border: '1px solid #fde68a',
+  borderRadius: '8px',
+  color: '#78350f',
+  fontSize: '12px',
+  lineHeight: 1.6,
+  marginTop: '12px',
+  padding: '10px 12px',
+  wordBreak: 'break-word',
+};

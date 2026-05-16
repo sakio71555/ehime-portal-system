@@ -43,6 +43,20 @@ export default function AdminDuplicateModal({ duplicateGroups, onClose, onDelete
                       ステータス: <span style={{ fontWeight: 'bold' }}>{item.crawl_status === 'published' ? '✅ 公開中' : item.crawl_status === 'archived' ? '📁 募集終了' : '📝 承認待ち'}</span> | 
                       機関: {item.organization || '不明'}
                     </div>
+                    {(item.admin_note || item.duplicate_of_id || item.duplicate_reason) && (
+                      <div style={adminReviewNoticeStyle}>
+                        <div style={{ fontWeight: 'bold', color: '#92400e', marginBottom: '4px' }}>
+                          ⚠ 重複候補・非公開理由あり
+                        </div>
+                        {item.duplicate_of_id && (
+                          <div>
+                            正データID: <strong>{item.duplicate_of_id}</strong>
+                          </div>
+                        )}
+                        {item.duplicate_reason && <div>理由: {item.duplicate_reason}</div>}
+                        {item.admin_note && <div>メモ: {item.admin_note}</div>}
+                      </div>
+                    )}
                   </div>
                   
                 </div>
@@ -60,3 +74,16 @@ export default function AdminDuplicateModal({ duplicateGroups, onClose, onDelete
     </div>
   );
 }
+
+const adminReviewNoticeStyle = {
+  backgroundColor: '#fffbeb',
+  border: '1px solid #fde68a',
+  borderRadius: '8px',
+  color: '#78350f',
+  fontSize: '12px',
+  lineHeight: 1.6,
+  marginTop: '10px',
+  padding: '8px 10px',
+  whiteSpace: 'normal',
+  wordBreak: 'break-word',
+};

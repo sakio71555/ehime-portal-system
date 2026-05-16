@@ -195,6 +195,55 @@ export default function AdminBasicFields({
           </div>
         </div>
       </div>
+
+      <div style={adminNoteSection}>
+        <div style={{ marginBottom: '12px' }}>
+          <div style={adminNoteTitle}>⚠ 管理メモ・非公開理由</div>
+          <div style={adminNoteHelp}>
+            重複・非公開理由など、公開判断で見落としたくない運用メモを残します。ユーザー画面には表示されません。
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '14px' }}>
+          <label style={labelStyle}>管理メモ</label>
+          <textarea
+            value={editForm.admin_note || ''}
+            onChange={(e) => updateEditForm({ admin_note: e.target.value })}
+            rows={3}
+            placeholder="例：重複候補。正データはID 1570。1570を優先。"
+            style={textareaStyle}
+          />
+        </div>
+
+        <div style={twoColumnGridNoMargin}>
+          <div>
+            <label style={labelStyle}>重複元ID</label>
+            <input
+              type="number"
+              min="1"
+              value={editForm.duplicate_of_id || ''}
+              onChange={(e) =>
+                updateEditForm({ duplicate_of_id: e.target.value })
+              }
+              placeholder="例：1570"
+              style={plainInputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>重複理由</label>
+            <input
+              type="text"
+              value={editForm.duplicate_reason || ''}
+              onChange={(e) =>
+                updateEditForm({ duplicate_reason: e.target.value })
+              }
+              placeholder="例：公式URLがトップページ寄りのため"
+              style={plainInputStyle}
+            />
+          </div>
+        </div>
+      </div>
     </>
   );
 }
@@ -295,6 +344,51 @@ const twoColumnGrid = {
   gridTemplateColumns: '1fr 1fr',
   gap: '20px',
   marginBottom: '20px',
+};
+
+const twoColumnGridNoMargin = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: '20px',
+};
+
+const adminNoteSection = {
+  backgroundColor: '#fffbeb',
+  border: '1px solid #fde68a',
+  borderRadius: '8px',
+  padding: '16px',
+  marginBottom: '20px',
+};
+
+const adminNoteTitle = {
+  color: '#92400e',
+  fontSize: '14px',
+  fontWeight: 'bold',
+};
+
+const adminNoteHelp = {
+  color: '#92400e',
+  fontSize: '12px',
+  lineHeight: 1.6,
+  marginTop: '4px',
+};
+
+const plainInputStyle = {
+  width: '100%',
+  padding: '10px 12px',
+  border: '1px solid #d1d5db',
+  borderRadius: '6px',
+  color: '#1f2937',
+  fontSize: '14px',
+  boxSizing: 'border-box',
+  backgroundColor: 'white',
+};
+
+const textareaStyle = {
+  ...plainInputStyle,
+  minHeight: '84px',
+  lineHeight: 1.6,
+  resize: 'vertical',
 };
 
 const smallBlueButton = {

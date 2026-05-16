@@ -109,7 +109,9 @@ export default function AdminDashboard() {
   };
 
   const handleCheckDuplicates = async () => {
-    const { data, error } = await supabase.from('subsidies').select('id, title, source_url, crawl_status, fetched_at, organization');
+    const { data, error } = await supabase
+      .from('subsidies')
+      .select('id, title, source_url, crawl_status, fetched_at, organization, admin_note, duplicate_of_id, duplicate_reason');
     if (error) return alert('データ取得エラー: ' + error.message);
 
     const statusRank = { 'published': 1, 'archived': 2, 'draft': 3 };
