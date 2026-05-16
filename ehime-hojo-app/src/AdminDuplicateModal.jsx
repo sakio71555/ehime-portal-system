@@ -1,13 +1,13 @@
 import React from 'react';
 
-export default function AdminDuplicateModal({ duplicateGroups, onClose, onDeleteItem, onNotDuplicate }) {
+export default function AdminDuplicateModal({ duplicateGroups, onClose, onDraftItem, onNotDuplicate, onOpenItemById }) {
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', maxWidth: '800px', width: '90%', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
         <h2 style={{ marginTop: 0, fontSize: '20px', fontWeight: 'bold', color: '#111827' }}>🧹 重複データの確認</h2>
         <p style={{ color: '#4b5563', fontSize: '14px', marginBottom: '24px', lineHeight: '1.6' }}>
           以下のデータが「重複（同じ補助金）」として検出されました。<br/>
-          別々の補助金の場合は<span style={{ color: '#059669', fontWeight: 'bold' }}>「✨残す(除外)」</span>を、不要なデータは<span style={{ color: '#dc2626', fontWeight: 'bold' }}>「🗑個別に削除」</span>を押してください。<br/>
+          別々の補助金の場合は<span style={{ color: '#059669', fontWeight: 'bold' }}>「✨残す(除外)」</span>を、不要なデータは<span style={{ color: '#92400e', fontWeight: 'bold' }}>「📝非公開にする」</span>を押してください。<br/>
           （※グループの残りデータが1件になると自動でこのリストから消滅します）
         </p>
         
@@ -29,10 +29,10 @@ export default function AdminDuplicateModal({ duplicateGroups, onClose, onDelete
                       ✨ 残す (除外)
                     </button>
                     <button 
-                      onClick={() => onDeleteItem(groupIndex, item.id)}
-                      style={{ backgroundColor: '#dc2626', color: 'white', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', border: 'none', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                      onClick={() => onDraftItem(groupIndex, item)}
+                      style={{ backgroundColor: '#f59e0b', color: '#111827', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', border: 'none', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
-                      🗑 削除する
+                      📝 非公開にする
                     </button>
                   </div>
 
@@ -50,7 +50,18 @@ export default function AdminDuplicateModal({ duplicateGroups, onClose, onDelete
                         </div>
                         {item.duplicate_of_id && (
                           <div>
-                            正データID: <strong>{item.duplicate_of_id}</strong>
+                            正データID:{' '}
+                            {onOpenItemById ? (
+                              <button
+                                type="button"
+                                onClick={() => onOpenItemById(item.duplicate_of_id)}
+                                style={inlineLinkButton}
+                              >
+                                {item.duplicate_of_id}を開く
+                              </button>
+                            ) : (
+                              <strong>{item.duplicate_of_id}</strong>
+                            )}
                           </div>
                         )}
                         {item.duplicate_reason && <div>理由: {item.duplicate_reason}</div>}
@@ -83,7 +94,20 @@ const adminReviewNoticeStyle = {
   fontSize: '12px',
   lineHeight: 1.6,
   marginTop: '10px',
+  maxHeight: '120px',
+  overflowY: 'auto',
   padding: '8px 10px',
   whiteSpace: 'normal',
   wordBreak: 'break-word',
+};
+
+const inlineLinkButton = {
+  backgroundColor: 'transparent',
+  border: 'none',
+  color: '#2563eb',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 'bold',
+  padding: 0,
+  textDecoration: 'underline',
 };

@@ -38,7 +38,7 @@ const getMissingFields = (item) => {
 const hasAdminReviewNote = (item) =>
   Boolean(item?.admin_note || item?.duplicate_of_id || item?.duplicate_reason);
 
-const AdminReviewNotice = ({ item }) => {
+const AdminReviewNotice = ({ item, onOpenDuplicateTarget }) => {
   if (!hasAdminReviewNote(item)) return null;
 
   return (
@@ -48,7 +48,18 @@ const AdminReviewNotice = ({ item }) => {
       </div>
       {item.duplicate_of_id && (
         <div>
-          正データID: <strong>{item.duplicate_of_id}</strong>
+          正データID:{' '}
+          {onOpenDuplicateTarget ? (
+            <button
+              type="button"
+              onClick={() => onOpenDuplicateTarget(item.duplicate_of_id)}
+              style={inlineLinkButton}
+            >
+              {item.duplicate_of_id}を開く
+            </button>
+          ) : (
+            <strong>{item.duplicate_of_id}</strong>
+          )}
         </div>
       )}
       {item.duplicate_reason && <div>理由: {item.duplicate_reason}</div>}
@@ -57,7 +68,7 @@ const AdminReviewNotice = ({ item }) => {
   );
 };
 
-export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVisibility, onArchive, onRestore }) {
+export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVisibility, onArchive, onRestore, onOpenDuplicateTarget }) {
   const missingFields = getMissingFields(item);
   
   // 🔥 UPDATE: official_url を優先して外部ポータル判定を行う
@@ -94,7 +105,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             </div>
           )}
 
-          <AdminReviewNotice item={item} />
+          <AdminReviewNotice item={item} onOpenDuplicateTarget={onOpenDuplicateTarget} />
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button onClick={onDelete} style={{ backgroundColor: '#fee2e2', color: '#dc2626', padding: '10px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', border: 'none' }}>削除</button>
@@ -128,7 +139,10 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             <span>⏰ 締切: {item.application_period_text || item.deadline || '不明'}</span>
           </div>
 
-          {!item.is_active && <AdminReviewNotice item={item} />}
+          <AdminReviewNotice
+            item={item}
+            onOpenDuplicateTarget={onOpenDuplicateTarget}
+          />
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -170,7 +184,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
           <span>⏰ 元の締切: {item.application_period_text || item.deadline || '不明'}</span>
         </div>
 
-        <AdminReviewNotice item={item} />
+        <AdminReviewNotice item={item} onOpenDuplicateTarget={onOpenDuplicateTarget} />
       </div>
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -189,6 +203,19 @@ const adminReviewNoticeStyle = {
   fontSize: '12px',
   lineHeight: 1.6,
   marginTop: '12px',
+  maxHeight: '120px',
+  overflowY: 'auto',
   padding: '10px 12px',
   wordBreak: 'break-word',
+};
+
+const inlineLinkButton = {
+  backgroundColor: 'transparent',
+  border: 'none',
+  color: '#2563eb',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 'bold',
+  padding: 0,
+  textDecoration: 'underline',
 };

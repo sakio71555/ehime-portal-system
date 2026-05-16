@@ -39,6 +39,50 @@ const parseDeadline = (deadlineStr) => {
   return 9999999999998;
 };
 
+const getPublishedSortTime = (item) => {
+  const dateValue =
+    item?.published_at ||
+    item?.updated_at ||
+    item?.fetched_at ||
+    item?.created_at;
+
+  const time = dateValue ? new Date(dateValue).getTime() : 0;
+
+  if (Number.isFinite(time) && time > 0) return time;
+
+  return Number(item?.id || 0);
+};
+
+const hasAdminReviewNote = (item) =>
+  Boolean(item?.admin_note || item?.duplicate_of_id || item?.duplicate_reason);
+
+const buildDuplicatePublishBlockMessage = (item) => [
+  '⚠ 正データIDが設定された重複候補のため、このまま公開できません。',
+  '',
+  `タイトル: ${item?.title || '未記載'}`,
+  item?.duplicate_of_id ? `正データID: ${item.duplicate_of_id}` : null,
+  item?.duplicate_reason ? `理由: ${item.duplicate_reason}` : null,
+  item?.admin_note ? `メモ: ${item.admin_note}` : null,
+  '',
+  '公開する場合は、編集画面で重複元ID・重複理由・管理メモを確認し、重複候補ではない状態にしてください。',
+]
+  .filter(Boolean)
+  .join('\n');
+
+const buildAdminReviewPublishWarning = (item) => [
+  '⚠ 管理メモ・重複理由があるデータを公開しようとしています。',
+  '',
+  `タイトル: ${item?.title || '未記載'}`,
+  item?.duplicate_of_id ? `正データID: ${item.duplicate_of_id}` : null,
+  item?.duplicate_reason ? `理由: ${item.duplicate_reason}` : null,
+  item?.admin_note ? `メモ: ${item.admin_note}` : null,
+  '',
+  '重複候補や非公開理由があるデータです。',
+  '本当に公開しますか？',
+]
+  .filter(Boolean)
+  .join('\n');
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('drafts'); 
   const [drafts, setDrafts] = useState([]);
@@ -46,6 +90,7 @@ export default function AdminDashboard() {
   const [archivedItems, setArchivedItems] = useState([]); 
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [sortBy, setSortBy] = useState('fetched_at_desc'); 
+  const [reviewFilter, setReviewFilter] = useState('all');
   
   const [editingItem, setEditingItem] = useState(null); 
   const [duplicateGroups, setDuplicateGroups] = useState([]);
@@ -69,6 +114,7 @@ export default function AdminDashboard() {
   const getSortedItems = (items) => {
     const sorted = [...items];
     sorted.sort((a, b) => {
+      if (sortBy === 'published_at_desc') return getPublishedSortTime(b) - getPublishedSortTime(a);
       if (sortBy === 'amount_desc') return (b.amount_max_yen || parseAmount(b.amount)) - (a.amount_max_yen || parseAmount(a.amount));
       if (sortBy === 'deadline_asc') return parseDeadline(a.application_end_date || a.deadline) - parseDeadline(b.application_end_date || b.deadline);
       if (sortBy === 'region_title_asc') {
@@ -85,8 +131,29 @@ export default function AdminDashboard() {
     return sorted;
   };
 
-  const toggleVisibility = async (id, currentActiveStatus) => {
-    await supabase.from('subsidies').update({ is_active: !currentActiveStatus }).eq('id', id);
+  const getVisibleItems = (items) => {
+    const sortedItems = getSortedItems(items);
+    if (reviewFilter !== 'review_notes') return sortedItems;
+    return sortedItems.filter(hasAdminReviewNote);
+  };
+
+  const toggleVisibility = async (item) => {
+    const currentActiveStatus = Boolean(item.is_active);
+
+    if (!currentActiveStatus && item.duplicate_of_id) {
+      alert(buildDuplicatePublishBlockMessage(item));
+      return;
+    }
+
+    if (!currentActiveStatus && hasAdminReviewNote(item)) {
+      const shouldActivate = window.confirm(
+        buildAdminReviewPublishWarning(item)
+      );
+
+      if (!shouldActivate) return;
+    }
+
+    await supabase.from('subsidies').update({ is_active: !currentActiveStatus }).eq('id', item.id);
     setRefreshCounter(prev => prev + 1); 
   };
 
@@ -96,9 +163,23 @@ export default function AdminDashboard() {
     setRefreshCounter(prev => prev + 1);
   };
 
-  const handleRestore = async (id) => {
+  const handleRestore = async (item) => {
     if (!window.confirm('この補助金を再び「公開中」に戻しますか？')) return;
-    await supabase.from('subsidies').update({ crawl_status: 'published', is_active: true }).eq('id', id);
+
+    if (item.duplicate_of_id) {
+      alert(buildDuplicatePublishBlockMessage(item));
+      return;
+    }
+
+    if (hasAdminReviewNote(item)) {
+      const shouldRestore = window.confirm(
+        buildAdminReviewPublishWarning(item)
+      );
+
+      if (!shouldRestore) return;
+    }
+
+    await supabase.from('subsidies').update({ crawl_status: 'published', is_active: true }).eq('id', item.id);
     setRefreshCounter(prev => prev + 1);
   };
 
@@ -111,7 +192,7 @@ export default function AdminDashboard() {
   const handleCheckDuplicates = async () => {
     const { data, error } = await supabase
       .from('subsidies')
-      .select('id, title, source_url, crawl_status, fetched_at, organization, admin_note, duplicate_of_id, duplicate_reason');
+      .select('id, title, source_url, official_url, source_external_id, crawl_status, fetched_at, organization, admin_note, duplicate_of_id, duplicate_reason');
     if (error) return alert('データ取得エラー: ' + error.message);
 
     const statusRank = { 'published': 1, 'archived': 2, 'draft': 3 };
@@ -135,8 +216,9 @@ export default function AdminDashboard() {
 
     const normalizeUrl = (url) => {
       if (!url || !url.startsWith('http')) return null;
-      let u = url.replace(/^https?:\/\//, '').replace(/\/$/, '').split('#')[0].split('?')[0];
+      let u = url.replace(/^https?:\/\//, '').split('#')[0].split('?')[0];
       u = u.replace(/\/(index|default)\.(html|php|aspx|jsp)$/i, '');
+      u = u.replace(/\/$/, '');
       return u;
     };
 
@@ -144,20 +226,23 @@ export default function AdminDashboard() {
 
     sortedData.forEach(item => {
       const nTitle = normalizeTitle(item.title);
-      const nUrl = normalizeUrl(item.source_url);
+      const nUrls = [normalizeUrl(item.official_url), normalizeUrl(item.source_url)].filter(Boolean);
+      const nExternalId = item.source_external_id || null;
       let matchedGroup = null;
 
       for (const group of groups) {
         for (const member of group) {
           const mTitle = normalizeTitle(member.title);
-          const mUrl = normalizeUrl(member.source_url);
-          const isUrlMatch = nUrl && mUrl && nUrl === mUrl;
+          const mUrls = [normalizeUrl(member.official_url), normalizeUrl(member.source_url)].filter(Boolean);
+          const mExternalId = member.source_external_id || null;
+          const isUrlMatch = nUrls.length > 0 && mUrls.length > 0 && nUrls.some((url) => mUrls.includes(url));
+          const isExternalIdMatch = nExternalId && mExternalId && nExternalId === mExternalId;
           const isTitleMatch = nTitle && mTitle && (
             nTitle === mTitle ||
             (nTitle.length > 7 && mTitle.length > 7 && (nTitle.includes(mTitle) || mTitle.includes(nTitle)))
           );
 
-          if (isUrlMatch || isTitleMatch) {
+          if (isExternalIdMatch || isUrlMatch || isTitleMatch) {
             matchedGroup = group;
             break;
           }
@@ -179,19 +264,64 @@ export default function AdminDashboard() {
     setShowDuplicateModal(true);
   };
 
-  const handleDeleteDuplicateItem = async (groupIndex, itemId) => {
-    if (!window.confirm('本当にこのデータを削除してもよろしいですか？（データベースから完全に消去されます）')) return;
-    const { error } = await supabase.from('subsidies').delete().eq('id', itemId);
+  const handleDraftDuplicateItem = async (groupIndex, item) => {
+    if (!window.confirm('このデータを削除せず、承認待ち・非公開に戻しますか？')) return;
+
+    const nextAdminNote = [
+      item.admin_note,
+      '重複チェック画面から承認待ち・非公開に戻しました。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const { error } = await supabase
+      .from('subsidies')
+      .update({
+        crawl_status: 'draft',
+        is_active: false,
+        admin_note: nextAdminNote,
+      })
+      .eq('id', item.id);
+
     if (!error) {
-      removeDuplicateItemFromUI(groupIndex, itemId);
+      removeDuplicateItemFromUI(groupIndex, item.id);
       setRefreshCounter(prev => prev + 1);
     } else {
-      alert('削除エラー: ' + error.message);
+      alert('非公開化エラー: ' + error.message);
     }
   };
 
   const handleNotDuplicateItem = (groupIndex, itemId) => {
     removeDuplicateItemFromUI(groupIndex, itemId);
+  };
+
+  const handleOpenItemById = async (id) => {
+    const targetId = Number(id);
+    if (!Number.isFinite(targetId)) return;
+
+    const localItem = [...drafts, ...publishedItems, ...archivedItems].find(
+      (item) => Number(item.id) === targetId
+    );
+
+    if (localItem) {
+      setEditingItem(localItem);
+      setShowDuplicateModal(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('subsidies')
+      .select('*')
+      .eq('id', targetId)
+      .single();
+
+    if (error || !data) {
+      alert(`ID ${targetId} のデータが見つかりませんでした。`);
+      return;
+    }
+
+    setEditingItem(data);
+    setShowDuplicateModal(false);
   };
 
   const removeDuplicateItemFromUI = (groupIndex, itemId) => {
@@ -208,6 +338,17 @@ export default function AdminDashboard() {
     await supabase.auth.signOut();
     window.location.href = '/'; 
   };
+
+  const currentTabItems =
+    activeTab === 'drafts'
+      ? drafts
+      : activeTab === 'published'
+        ? publishedItems
+        : archivedItems;
+  const currentReviewCount = currentTabItems.filter(hasAdminReviewNote).length;
+  const visibleDrafts = getVisibleItems(drafts);
+  const visiblePublishedItems = getVisibleItems(publishedItems);
+  const visibleArchivedItems = getVisibleItems(archivedItems);
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: 'sans-serif' }}>
@@ -235,7 +376,13 @@ export default function AdminDashboard() {
       <div style={{ maxWidth: '1000px', margin: '32px auto', padding: '0 24px' }}>
         
         {showDuplicateModal && (
-          <AdminDuplicateModal duplicateGroups={duplicateGroups} onClose={() => setShowDuplicateModal(false)} onDeleteItem={handleDeleteDuplicateItem} onNotDuplicate={handleNotDuplicateItem} />
+          <AdminDuplicateModal
+            duplicateGroups={duplicateGroups}
+            onClose={() => setShowDuplicateModal(false)}
+            onDraftItem={handleDraftDuplicateItem}
+            onNotDuplicate={handleNotDuplicateItem}
+            onOpenItemById={handleOpenItemById}
+          />
         )}
 
         {showBatchModal && (
@@ -265,25 +412,56 @@ export default function AdminDashboard() {
                 <button onClick={() => setActiveTab('archived')} style={{ backgroundColor: 'transparent', border: 'none', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', color: activeTab === 'archived' ? '#d97706' : '#6b7280', borderBottom: activeTab === 'archived' ? '3px solid #d97706' : 'none', paddingBottom: '8px', marginBottom: '-18px' }}>📁 募集終了 ({archivedItems.length})</button>
               </div>
 
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: 'white', color: '#374151', fontSize: '14px', outline: 'none', cursor: 'pointer' }}>
-                <option value="fetched_at_desc">✨ 新着順（取得日が新しい順）</option>
-                <option value="deadline_asc">⏰ 締切が近い順</option>
-                <option value="amount_desc">💰 上限金額が高い順</option>
-                <option value="region_title_asc">📍 地区別・名前順</option>
-              </select>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() =>
+                    setReviewFilter((current) =>
+                      current === 'review_notes' ? 'all' : 'review_notes'
+                    )
+                  }
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: reviewFilter === 'review_notes' ? '1px solid #f59e0b' : '1px solid #d1d5db',
+                    backgroundColor: reviewFilter === 'review_notes' ? '#fffbeb' : 'white',
+                    color: reviewFilter === 'review_notes' ? '#92400e' : '#374151',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {reviewFilter === 'review_notes' ? '⚠ 重複候補のみ表示中' : `⚠ 重複候補のみ (${currentReviewCount})`}
+                </button>
+
+                {reviewFilter === 'review_notes' && (
+                  <span style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '999px', color: '#92400e', fontSize: '12px', fontWeight: 'bold', padding: '6px 10px' }}>
+                    {currentReviewCount}件に絞り込み中
+                  </span>
+                )}
+
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: 'white', color: '#374151', fontSize: '14px', outline: 'none', cursor: 'pointer' }}>
+                  <option value="fetched_at_desc">✨ 新着順（取得日が新しい順）</option>
+                  {activeTab === 'published' && (
+                    <option value="published_at_desc">✅ 公開された順（新しい順）</option>
+                  )}
+                  <option value="deadline_asc">⏰ 締切が近い順</option>
+                  <option value="amount_desc">💰 上限金額が高い順</option>
+                  <option value="region_title_asc">📍 地区別・名前順</option>
+                </select>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gap: '16px' }}>
               {activeTab === 'drafts' && (
-                getSortedItems(drafts).length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>🎉 承認待ちのデータはありません。</div> : getSortedItems(drafts).map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onEdit={() => setEditingItem(item)} onDelete={() => handleDelete(item.id)} />)
+                visibleDrafts.length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>🎉 表示できる承認待ちデータはありません。</div> : visibleDrafts.map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onEdit={() => setEditingItem(item)} onDelete={() => handleDelete(item.id)} onOpenDuplicateTarget={handleOpenItemById} />)
               )}
 
               {activeTab === 'published' && (
-                getSortedItems(publishedItems).length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>公開されているデータはありません。</div> : getSortedItems(publishedItems).map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onEdit={() => setEditingItem(item)} onToggleVisibility={() => toggleVisibility(item.id, item.is_active)} onArchive={() => handleArchive(item.id)} />)
+                visiblePublishedItems.length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>表示できる公開データはありません。</div> : visiblePublishedItems.map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onEdit={() => setEditingItem(item)} onToggleVisibility={() => toggleVisibility(item)} onArchive={() => handleArchive(item.id)} onOpenDuplicateTarget={handleOpenItemById} />)
               )}
 
               {activeTab === 'archived' && (
-                getSortedItems(archivedItems).length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>募集終了になったデータはありません。</div> : getSortedItems(archivedItems).map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onRestore={() => handleRestore(item.id)} onDelete={() => handleDelete(item.id)} />)
+                visibleArchivedItems.length === 0 ? <div style={{ backgroundColor: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', color: '#6b7280' }}>表示できる募集終了データはありません。</div> : visibleArchivedItems.map(item => <AdminListItem key={item.id} item={item} tab={activeTab} onRestore={() => handleRestore(item)} onDelete={() => handleDelete(item.id)} onOpenDuplicateTarget={handleOpenItemById} />)
               )}
             </div>
           </>

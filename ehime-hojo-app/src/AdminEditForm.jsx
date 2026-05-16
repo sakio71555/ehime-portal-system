@@ -846,6 +846,40 @@ function inferIndustryTagsFromForm(form) {
   return inferred;
 }
 
+function buildAutoTaggedPublishForm(form) {
+  const inferredPurposes = inferPurposeTagsFromForm(form);
+  const purposes =
+    inferredPurposes.length > 0
+      ? inferredPurposes
+      : Array.isArray(form.purposes)
+        ? form.purposes
+        : [];
+
+  const formWithPurposes = {
+    ...form,
+    purposes,
+  };
+
+  const inferredIndustries = inferIndustryTagsFromForm(formWithPurposes);
+  const industries =
+    inferredIndustries.length > 0
+      ? inferredIndustries
+      : Array.isArray(form.industries)
+        ? form.industries
+        : [];
+
+  return forceApplicationStatusByPeriod({
+    ...form,
+    purposes,
+    industries,
+    tags: makeTagsFromPurposesAndIndustries(
+      purposes,
+      industries,
+      form.tags || []
+    ),
+  });
+}
+
 function buildSubsidyUpdatePayload(form) {
   const fixed = forceApplicationStatusByPeriod(form);
   const duplicateOfIdText = String(fixed.duplicate_of_id || '').trim();
@@ -898,6 +932,41 @@ function buildSubsidyUpdatePayload(form) {
   };
 }
 
+function hasAdminReviewNote(form) {
+  return Boolean(form?.admin_note || form?.duplicate_of_id || form?.duplicate_reason);
+}
+
+function buildDuplicatePublishBlockMessage(form) {
+  return [
+    '⚠ 正データIDが設定された重複候補のため、このまま公開できません。',
+    '',
+    `タイトル: ${form.title || '未記載'}`,
+    form.duplicate_of_id ? `正データID: ${form.duplicate_of_id}` : null,
+    form.duplicate_reason ? `理由: ${form.duplicate_reason}` : null,
+    form.admin_note ? `メモ: ${form.admin_note}` : null,
+    '',
+    '公開する場合は、重複元ID・重複理由・管理メモを確認し、重複候補ではない状態にしてから公開してください。',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildPublishWarningMessage(form) {
+  return [
+    '⚠ 管理メモ・重複理由があるデータを公開しようとしています。',
+    '',
+    `タイトル: ${form.title || '未記載'}`,
+    form.duplicate_of_id ? `正データID: ${form.duplicate_of_id}` : null,
+    form.duplicate_reason ? `理由: ${form.duplicate_reason}` : null,
+    form.admin_note ? `メモ: ${form.admin_note}` : null,
+    '',
+    '重複候補や非公開理由があるデータです。',
+    '本当に公開しますか？',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export default function AdminEditForm({
   initialData,
   supabase,
@@ -944,6 +1013,42 @@ export default function AdminEditForm({
 
   const updateEditForm = (patch) => {
     setEditForm((prev) => forceApplicationStatusByPeriod({ ...prev, ...patch }));
+  };
+
+  const validateDuplicateTarget = async (form) => {
+    const duplicateOfIdText = String(form.duplicate_of_id || '').trim();
+
+    if (!duplicateOfIdText) return true;
+
+    if (!/^\d+$/.test(duplicateOfIdText)) {
+      alert('重複元IDは数字で入力してください。');
+      return false;
+    }
+
+    const duplicateOfId = Number(duplicateOfIdText);
+
+    if (Number(initialData?.id) === duplicateOfId) {
+      alert('自分自身のIDは重複元IDにできません。');
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from('subsidies')
+      .select('id, title, crawl_status, is_active')
+      .eq('id', duplicateOfId)
+      .maybeSingle();
+
+    if (error) {
+      alert('重複元IDの確認に失敗しました: ' + error.message);
+      return false;
+    }
+
+    if (!data) {
+      alert(`重複元ID ${duplicateOfId} のデータが見つかりません。`);
+      return false;
+    }
+
+    return true;
   };
 
   const handleCheckboxChange = (field, value) => {
@@ -1081,7 +1186,13 @@ export default function AdminEditForm({
       return;
     }
 
-    const fixedEditForm = forceApplicationStatusByPeriod(editForm);
+    const baseFixedEditForm = forceApplicationStatusByPeriod(editForm);
+    const fixedEditForm = isCurrentlyPublished
+      ? baseFixedEditForm
+      : buildAutoTaggedPublishForm(baseFixedEditForm);
+
+    if (!(await validateDuplicateTarget(fixedEditForm))) return;
+
     const payload = buildSubsidyUpdatePayload(fixedEditForm);
 
     const { error } = await supabase
@@ -1108,6 +1219,22 @@ export default function AdminEditForm({
     const newStatus = isCurrentlyPublished ? 'draft' : 'published';
 
     const fixedEditForm = forceApplicationStatusByPeriod(editForm);
+
+    if (!(await validateDuplicateTarget(fixedEditForm))) return;
+
+    if (!isCurrentlyPublished && fixedEditForm.duplicate_of_id) {
+      alert(buildDuplicatePublishBlockMessage(fixedEditForm));
+      return;
+    }
+
+    if (!isCurrentlyPublished && hasAdminReviewNote(fixedEditForm)) {
+      const shouldPublish = window.confirm(
+        buildPublishWarningMessage(fixedEditForm)
+      );
+
+      if (!shouldPublish) return;
+    }
+
     const payload = buildSubsidyUpdatePayload(fixedEditForm);
 
     const { error } = await supabase
