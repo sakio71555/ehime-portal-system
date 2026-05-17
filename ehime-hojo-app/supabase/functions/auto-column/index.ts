@@ -28,6 +28,74 @@ const createSlug = (value: string) => {
   return base || `column-${Date.now()}`;
 };
 
+const stripHtml = (value: string) =>
+  String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const buildImagePrompt = (theme: string) => `
+A clean modern flat vector illustration for a Japanese subsidy and public support media site.
+Theme: ${theme}.
+No text, no letters, no numbers, no logo.
+Soft corporate colors, simple composition, business support, local community, public service.
+`;
+
+const generateImage = async ({
+  openAiKey,
+  imageModel,
+  imageQuality,
+  imageTheme,
+}: {
+  openAiKey: string;
+  imageModel: string;
+  imageQuality: string;
+  imageTheme: string;
+}) => {
+  let base64Image = "";
+  let imageError = "";
+
+  try {
+    const imageRes = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openAiKey}`,
+      },
+      body: JSON.stringify({
+        model: imageModel,
+        prompt: buildImagePrompt(imageTheme),
+        n: 1,
+        size: "1024x1024",
+        quality: imageQuality,
+      }),
+    });
+
+    const imageJson = await imageRes.json();
+
+    if (imageRes.ok) {
+      base64Image = imageJson?.data?.[0]?.b64_json || "";
+      if (!base64Image) {
+        imageError = "画像生成APIは成功しましたが、画像データが返りませんでした。";
+      }
+    } else {
+      imageError =
+        imageJson?.error?.message ||
+        "OpenAIでの画像生成に失敗しました。";
+      console.warn("画像生成エラー:", imageError);
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "画像生成処理で不明なエラーが発生しました。";
+    imageError = message;
+    console.warn("画像生成処理でエラー:", message);
+  }
+
+  return { base64Image, imageError };
+};
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -53,8 +121,20 @@ serve(async (req: Request) => {
       typeof body?.extraInstructions === "string"
         ? body.extraInstructions.trim()
         : "";
+    const imageOnly = body?.imageOnly === true;
+    const thumbnailText =
+      typeof body?.thumbnailText === "string" ? body.thumbnailText.trim() : "";
+    const contentText =
+      typeof body?.content === "string" ? body.content.trim() : "";
 
-    if (!title && !subsidiesText) {
+    if (imageOnly && !title && !thumbnailText && !contentText) {
+      return jsonResponse(
+        { error: "画像生成用のタイトルまたは本文が指定されていません。" },
+        200
+      );
+    }
+
+    if (!imageOnly && !title && !subsidiesText) {
       return jsonResponse(
         { error: "タイトル、または補助金データが指定されていません。" },
         200
@@ -71,6 +151,29 @@ serve(async (req: Request) => {
     }
 
     const isAutoMode = Boolean(subsidiesText);
+    const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
+    const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
+
+    if (imageOnly) {
+      const fallbackTheme = stripHtml(contentText).slice(0, 180);
+      const imageTheme =
+        thumbnailText ||
+        title ||
+        fallbackTheme ||
+        "Ehime subsidy support and local business assistance";
+      const { base64Image, imageError } = await generateImage({
+        openAiKey,
+        imageModel,
+        imageQuality,
+        imageTheme,
+      });
+
+      return jsonResponse({
+        base64Image,
+        imageError,
+        imageModel,
+      });
+    }
 
     const systemPrompt = `
 あなたは、愛媛県内の中小企業・個人事業主向けに補助金・助成金情報をわかりやすく解説するWebメディアの編集者です。
@@ -258,55 +361,12 @@ ${extraInstructionBlock}
     }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
 
-    let base64Image = "";
-    let imageError = "";
-    const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
-    const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
-
-    try {
-      const imagePrompt = `
-A clean modern flat vector illustration for a Japanese small business subsidy blog.
-Theme: ${articleData.thumbnail_text}.
-No text, no letters, no numbers, no logo.
-Soft corporate colors, simple composition, business support, local community.
-`;
-
-      const imageRes = await fetch("https://api.openai.com/v1/images/generations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openAiKey}`,
-        },
-        body: JSON.stringify({
-          model: imageModel,
-          prompt: imagePrompt,
-          n: 1,
-          size: "1024x1024",
-          quality: imageQuality,
-        }),
-      });
-
-      const imageJson = await imageRes.json();
-
-      if (imageRes.ok) {
-        base64Image = imageJson?.data?.[0]?.b64_json || "";
-        if (!base64Image) {
-          imageError = "画像生成APIは成功しましたが、画像データが返りませんでした。";
-        }
-      } else {
-        imageError =
-          imageJson?.error?.message ||
-          "OpenAIでの画像生成に失敗しました。";
-        console.warn("画像生成エラー:", imageError);
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "画像生成処理で不明なエラーが発生しました。";
-      imageError = message;
-      console.warn("画像生成処理でエラー:", message);
-    }
+    const { base64Image, imageError } = await generateImage({
+      openAiKey,
+      imageModel,
+      imageQuality,
+      imageTheme: articleData.thumbnail_text,
+    });
 
     return jsonResponse({
       articleData,

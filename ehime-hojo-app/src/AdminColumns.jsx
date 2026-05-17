@@ -12,6 +12,8 @@ export default function AdminColumns({ initialMode = 'columns' }) {
   const logEndRef = useRef(null);
   const [editingColumn, setEditingColumn] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [regeneratingImageId, setRegeneratingImageId] = useState(null);
+  const [isBackfillingImages, setIsBackfillingImages] = useState(false);
 
   const fetchColumns = useCallback(async () => {
     if (!supabase) {
@@ -150,6 +152,139 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     }
 
     return supabase.storage.from('column-images').getPublicUrl(fileName).data.publicUrl;
+  };
+
+  const stripHtml = (value) =>
+    String(value || '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const buildImageOnlyBody = (column) => ({
+    imageOnly: true,
+    title: column.title || '',
+    category: column.category || '',
+    thumbnailText: column.thumbnail_text || column.title || '',
+    content: stripHtml(column.content || '').slice(0, 500),
+  });
+
+  const updateColumnThumbnailImage = async (column) => {
+    const { data, error } = await supabase.functions.invoke('auto-column', {
+      body: buildImageOnlyBody(column),
+    });
+
+    if (error) throw new Error(`サーバー通信エラー: ${error.message}`);
+    if (data?.error) throw new Error(data.error);
+
+    const base64Image = getGeneratedBase64Image(data);
+    const imageErrorMessage = getImageErrorMessage(data);
+
+    if (!base64Image) {
+      throw new Error(
+        imageErrorMessage || '画像データが返ってきませんでした。auto-column Edge Function のログを確認してください。'
+      );
+    }
+
+    const prefix = column.category === FEATURE_CATEGORY ? 'feature_image' : 'column_image';
+    const finalThumbnailUrl = await uploadGeneratedImage(base64Image, prefix);
+    const nextThumbnailText = column.thumbnail_text || column.title || '';
+
+    const { error: updateError } = await supabase
+      .from('columns')
+      .update({
+        thumbnail_url: finalThumbnailUrl,
+        thumbnail_text: nextThumbnailText,
+      })
+      .eq('id', column.id);
+
+    if (updateError) throw new Error(`DB保存エラー: ${updateError.message}`);
+
+    setColumns((prev) =>
+      prev.map((item) =>
+        item.id === column.id
+          ? {
+              ...item,
+              thumbnail_url: finalThumbnailUrl,
+              thumbnail_text: nextThumbnailText,
+            }
+          : item
+      )
+    );
+
+    setEditingColumn((prev) =>
+      prev?.id === column.id
+        ? {
+            ...prev,
+            thumbnail_url: finalThumbnailUrl,
+            thumbnail_text: nextThumbnailText,
+          }
+        : prev
+    );
+
+    return finalThumbnailUrl;
+  };
+
+  const handleRegenerateColumnImage = async (column) => {
+    if (!supabase) return alert('Supabaseの接続情報が設定されていません。');
+    if (!column?.id) return alert('画像だけ再生成するには、先に記事を保存してください。');
+
+    const hasImage = Boolean(column.thumbnail_url);
+    const confirmMessage = hasImage
+      ? `「${column.title || 'この記事'}」の画像だけを再生成し、現在の画像を差し替えますか？\n本文やタイトルは変更しません。`
+      : `「${column.title || 'この記事'}」の画像だけを生成しますか？\n本文やタイトルは変更しません。`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setRegeneratingImageId(column.id);
+
+    try {
+      await updateColumnThumbnailImage(column);
+      alert('画像だけ再生成しました！');
+    } catch (err) {
+      alert(`画像生成エラー: ${err.message}`);
+    } finally {
+      setRegeneratingImageId(null);
+    }
+  };
+
+  const handleBackfillMissingImages = async () => {
+    if (!supabase) return alert('Supabaseの接続情報が設定されていません。');
+
+    const targets = visibleColumns.filter((col) => !col.thumbnail_url);
+
+    if (targets.length === 0) {
+      return alert('画像が未設定の記事はありません。');
+    }
+
+    if (
+      !window.confirm(
+        `${isFeatureMode ? '特集記事' : 'コラム'}のうち、画像がない ${targets.length} 件に画像だけを順番に生成します。\n本文やタイトルは変更しません。\n実行しますか？`
+      )
+    ) {
+      return;
+    }
+
+    setIsBackfillingImages(true);
+    let successCount = 0;
+    let errorCount = 0;
+
+    try {
+      for (const column of targets) {
+        setRegeneratingImageId(column.id);
+        try {
+          await updateColumnThumbnailImage(column);
+          successCount += 1;
+        } catch (err) {
+          errorCount += 1;
+          console.error(`画像バックフィル失敗: ${column.title || column.id}`, err);
+        }
+      }
+
+      alert(`画像バックフィルが完了しました。\n成功: ${successCount}件\n失敗: ${errorCount}件`);
+    } finally {
+      setRegeneratingImageId(null);
+      setIsBackfillingImages(false);
+    }
   };
 
   const handleGenerateFromTitle = async () => {
@@ -427,6 +562,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
   const visibleColumns = columns.filter((col) =>
     isFeatureMode ? col.category === FEATURE_CATEGORY : col.category !== FEATURE_CATEGORY
   );
+  const missingImageCount = visibleColumns.filter((col) => !col.thumbnail_url).length;
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: 'sans-serif' }}>
@@ -475,11 +611,28 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
             <form onSubmit={handleUpdateColumn} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <div style={{ width: '120px', height: '80px', borderRadius: '8px', backgroundColor: '#e2e8f0', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {editingColumn.thumbnail_url ? (
-                    <img src={editingColumn.thumbnail_url} alt="サムネイル" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <span style={{ fontSize: '12px', color: '#9ca3af' }}>No Image</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                  <div style={{ width: '120px', height: '80px', borderRadius: '8px', backgroundColor: '#e2e8f0', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {editingColumn.thumbnail_url ? (
+                      <img src={editingColumn.thumbnail_url} alt="サムネイル" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <span style={{ fontSize: '12px', color: '#9ca3af' }}>No Image</span>
+                    )}
+                  </div>
+
+                  {editingColumn.id && (
+                    <button
+                      type="button"
+                      onClick={() => handleRegenerateColumnImage(editingColumn)}
+                      disabled={regeneratingImageId === editingColumn.id}
+                      style={{ backgroundColor: regeneratingImageId === editingColumn.id ? '#9ca3af' : '#7c3aed', color: 'white', border: 'none', borderRadius: '6px', padding: '7px 10px', fontSize: '12px', fontWeight: 'bold', cursor: regeneratingImageId === editingColumn.id ? 'not-allowed' : 'pointer' }}
+                    >
+                      {regeneratingImageId === editingColumn.id
+                        ? '生成中...'
+                        : editingColumn.thumbnail_url
+                          ? '画像だけ再生成'
+                          : '画像を生成'}
+                    </button>
                   )}
                 </div>
 
@@ -652,7 +805,17 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={handleBackfillMissingImages}
+                    disabled={isBackfillingImages || missingImageCount === 0}
+                    style={{ backgroundColor: isBackfillingImages || missingImageCount === 0 ? '#e5e7eb' : '#f5f3ff', color: isBackfillingImages || missingImageCount === 0 ? '#6b7280' : '#6d28d9', padding: '12px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: isBackfillingImages || missingImageCount === 0 ? 'not-allowed' : 'pointer', border: '1px solid #c4b5fd', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', whiteSpace: 'nowrap' }}
+                  >
+                    {isBackfillingImages
+                      ? '🖼 画像生成中...'
+                      : `🖼 No Imageを一括生成 (${missingImageCount})`}
+                  </button>
+
                   <button
                     onClick={() =>
                       setEditingColumn(
@@ -748,7 +911,19 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => handleRegenerateColumnImage(col)}
+                        disabled={regeneratingImageId === col.id}
+                        style={{ backgroundColor: regeneratingImageId === col.id ? '#e5e7eb' : '#f5f3ff', color: regeneratingImageId === col.id ? '#6b7280' : '#6d28d9', border: '1px solid #c4b5fd', padding: '8px 14px', borderRadius: '6px', fontSize: '13px', cursor: regeneratingImageId === col.id ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                      >
+                        {regeneratingImageId === col.id
+                          ? '生成中...'
+                          : col.thumbnail_url
+                            ? '画像を再生成'
+                            : '画像を生成'}
+                      </button>
+
                       <button onClick={() => setEditingColumn(col)} style={{ backgroundColor: 'white', color: '#3b82f6', border: '1px solid #3b82f6', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}>
                         編集
                       </button>
