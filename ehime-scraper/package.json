@@ -7,6 +7,10 @@
     "jgrants": "node import-jgrants.js",
     "scraper": "node run-scraper-ultimate.js",
     "scraper:dry": "SCRAPER_DRY_RUN=1 SCRAPER_MAX_URLS=30 SCRAPER_PREFILTER_SOURCE_URL=1 node run-scraper-ultimate.js",
+    "admin:server": "node admin-server.js",
+    "crawler:official": "SCRAPER_DRY_RUN=0 SCRAPER_MAX_URLS=180 SCRAPER_MAX_INSERTS=40 npm run scraper",
+    "crawler:jgrants": "JGRANTS_DRY_RUN=0 JGRANTS_LIMIT=100 npm run jgrants",
+    "crawler:all": "npm run crawler:official && npm run crawler:jgrants",
     "scraper:weekly": "SCRAPER_DRY_RUN=0 SCRAPER_MAX_URLS=180 SCRAPER_MAX_INSERTS=40 npm run scraper",
     "jgrants:weekly": "JGRANTS_DRY_RUN=0 JGRANTS_LIMIT=100 npm run jgrants",
     "weekly": "npm run scraper:weekly && npm run jgrants:weekly"

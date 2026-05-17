@@ -134,6 +134,77 @@ ls -lt /opt/ehime-portal-system/ehime-scraper/logs/weekly-scraper-*.log | head
 tail -n 120 "$(ls -t /opt/ehime-portal-system/ehime-scraper/logs/weekly-scraper-*.log | head -1)"
 ```
 
+## 管理画面からの手動実行API
+
+管理画面の「クローラー管理」から手動実行する場合は、VPS上で小さなNode APIを起動します。
+このAPIは外部へ直接公開せず、`127.0.0.1:3100` で待ち受け、nginxから `/api/admin/crawler/` へproxyしてください。
+
+起動:
+
+```bash
+cd /opt/ehime-portal-system/ehime-scraper
+npm run admin:server
+```
+
+`.env` に追加する値:
+
+```bash
+CRAWLER_ADMIN_HOST=127.0.0.1
+CRAWLER_ADMIN_PORT=3100
+CRAWLER_ADMIN_EMAILS=管理者メールアドレス
+# または
+CRAWLER_ADMIN_USER_IDS=Supabaseの管理者user id
+```
+
+`SUPABASE_URL` と `SUPABASE_ANON_KEY` も必要です。
+APIは管理画面から送られる Supabase access token を検証し、さらに `CRAWLER_ADMIN_EMAILS` / `CRAWLER_ADMIN_USER_IDS` に一致するユーザーだけを許可します。
+秘密トークンをフロントのビルドへ埋め込まないでください。
+
+systemd例:
+
+```ini
+[Unit]
+Description=Ehime crawler admin API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ehime-portal-system/ehime-scraper
+ExecStart=/usr/bin/npm run admin:server
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+nginx proxy例:
+
+```nginx
+location /api/admin/crawler/ {
+    proxy_pass http://127.0.0.1:3100/api/admin/crawler/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Authorization $http_authorization;
+}
+```
+
+二重起動防止:
+
+```bash
+/opt/ehime-portal-system/ehime-scraper/logs/crawler.lock
+```
+
+手動実行ログ:
+
+- `logs/manual-all-YYYYMMDD-HHMMSS.log`
+- `logs/manual-official-YYYYMMDD-HHMMSS.log`
+- `logs/manual-jgrants-YYYYMMDD-HHMMSS.log`
+
 ## 主な環境変数
 
 - `SCRAPER_DRY_RUN=1`: 通常クローラーを保存せずに確認

@@ -4,6 +4,7 @@ import EhimeSubsidyPortal from './EhimeSubsidyPortal';
 import AdminDashboard from './AdminDashboard';
 import AdminExperts from './AdminExperts';
 import AdminColumns from './AdminColumns';
+import AdminCrawler from './AdminCrawler';
 import ColumnArticle from './ColumnArticle'; 
 import SubsidyDetail from './SubsidyDetail';
 import Login from './Login';
@@ -17,6 +18,7 @@ function AdminRouter({ session }) {
   if (tab === 'experts') return <AdminExperts />;
   if (tab === 'features') return <AdminColumns initialMode="features" />;
   if (tab === 'columns') return <AdminColumns initialMode="columns" />;
+  if (tab === 'crawler') return <AdminCrawler />;
   return <AdminDashboard />;
 }
 
