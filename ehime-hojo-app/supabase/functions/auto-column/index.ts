@@ -259,6 +259,9 @@ ${extraInstructionBlock}
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
 
     let base64Image = "";
+    let imageError = "";
+    const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
+    const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
 
     try {
       const imagePrompt = `
@@ -275,11 +278,11 @@ Soft corporate colors, simple composition, business support, local community.
           Authorization: `Bearer ${openAiKey}`,
         },
         body: JSON.stringify({
-          model: "dall-e-3",
+          model: imageModel,
           prompt: imagePrompt,
           n: 1,
           size: "1024x1024",
-          response_format: "b64_json",
+          quality: imageQuality,
         }),
       });
 
@@ -287,16 +290,29 @@ Soft corporate colors, simple composition, business support, local community.
 
       if (imageRes.ok) {
         base64Image = imageJson?.data?.[0]?.b64_json || "";
+        if (!base64Image) {
+          imageError = "画像生成APIは成功しましたが、画像データが返りませんでした。";
+        }
       } else {
-        console.warn("画像生成エラー:", imageJson?.error?.message || imageJson);
+        imageError =
+          imageJson?.error?.message ||
+          "OpenAIでの画像生成に失敗しました。";
+        console.warn("画像生成エラー:", imageError);
       }
-    } catch (imageError) {
-      console.warn("画像生成処理でエラー:", imageError);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "画像生成処理で不明なエラーが発生しました。";
+      imageError = message;
+      console.warn("画像生成処理でエラー:", message);
     }
 
     return jsonResponse({
       articleData,
       base64Image,
+      imageError,
+      imageModel,
     });
   } catch (error) {
     return jsonResponse(

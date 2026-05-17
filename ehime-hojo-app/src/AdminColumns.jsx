@@ -94,8 +94,35 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 `.trim();
   };
 
+  const normalizeBase64Image = (base64Image) => {
+    if (!base64Image) return '';
+
+    return String(base64Image)
+      .replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '')
+      .replace(/\s/g, '');
+  };
+
+  const getGeneratedBase64Image = (data) =>
+    normalizeBase64Image(
+      data?.base64Image ||
+        data?.imageBase64 ||
+        data?.thumbnailBase64 ||
+        data?.image?.b64_json ||
+        data?.data?.[0]?.b64_json ||
+        ''
+    );
+
+  const getImageErrorMessage = (data) =>
+    data?.imageError || data?.imageWarning || data?.image_error || '';
+
   const base64ToBlob = (base64Image) => {
-    const byteCharacters = atob(base64Image);
+    const normalizedBase64 = normalizeBase64Image(base64Image);
+
+    if (!normalizedBase64) {
+      throw new Error('画像データが空です。');
+    }
+
+    const byteCharacters = atob(normalizedBase64);
     const byteNumbers = new Array(byteCharacters.length);
 
     for (let i = 0; i < byteCharacters.length; i += 1) {
@@ -159,7 +186,8 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       if (data?.error) throw new Error(data.error);
 
       const articleData = data?.articleData;
-      const base64Image = data?.base64Image;
+      const base64Image = getGeneratedBase64Image(data);
+      const imageErrorMessage = getImageErrorMessage(data);
 
       if (!articleData) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
@@ -187,7 +215,15 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         tags: articleData.tags || [],
       }));
 
-      alert('✨ AIによる記事と画像の生成が完了しました！内容を確認して保存してください。');
+      if (finalThumbnailUrl) {
+        alert('✨ AIによる記事と画像の生成が完了しました！内容を確認して保存してください。');
+      } else {
+        alert(
+          `記事は生成できましたが、画像は生成できませんでした。\n` +
+            `原因: ${imageErrorMessage || '画像データが返ってきませんでした。'}\n\n` +
+            `記事内容を保存することはできます。画像生成の復旧には auto-column Edge Function の再デプロイと OpenAI画像モデル設定を確認してください。`
+        );
+      }
     } catch (err) {
       alert(`❌ エラー: ${err.message}`);
     } finally {
@@ -255,7 +291,8 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       if (data?.error) throw new Error(data.error);
 
       const articleData = data?.articleData;
-      const base64Image = data?.base64Image;
+      const base64Image = getGeneratedBase64Image(data);
+      const imageErrorMessage = getImageErrorMessage(data);
 
       if (!articleData) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
@@ -270,7 +307,10 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         finalThumbnailUrl = await uploadGeneratedImage(base64Image, 'column');
         addLog('🖼 画像が完成しました！データベースに保存しています...', 'success');
       } else {
-        addLog('⚠️ 画像データは返ってきませんでした。記事のみ保存します。', 'warning');
+        addLog(
+          `⚠️ 画像データは返ってきませんでした。記事のみ保存します。${imageErrorMessage ? ` 原因: ${imageErrorMessage}` : ''}`,
+          'warning'
+        );
       }
 
       addLog('💾 記事と画像をシステムに登録しています...', 'info');
