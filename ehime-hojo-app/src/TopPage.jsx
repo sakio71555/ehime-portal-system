@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getTopFeaturePages } from './featurePages';
+import FeatureIcon from './components/FeatureIcon';
+import { supabase } from './lib/supabaseClient';
 
 const colors = {
   primary: '#19aeb8',
@@ -17,25 +20,10 @@ const BANNERS = [
   '/banner6.png',
 ];
 
-const FALLBACK_FEATURE_CARDS = [
-  {
-    icon: '🏗️',
-    title: '建設業・建築業の方必見',
-    description: '設備投資、省エネ、IT導入、人材確保、防災・BCPなどの制度を探せます。',
-    path: '/feature/construction',
-  },
-  {
-    icon: '🍽️',
-    title: '飲食店・小売店の方必見',
-    description: '店舗改装、販路開拓、省力化、デジタル化、省エネ設備などに使える制度を確認できます。',
-    path: '/feature/restaurant-retail',
-  },
-  {
-    icon: '💻',
-    title: '創業・IT導入・DXをお考えの方へ',
-    description: '創業、ホームページ制作、EC、業務システム、DXに関する制度を探せます。',
-    path: '/feature/startup-digital',
-  },
+const MOBILE_BANNERS = [
+  '/m_banner1.png',
+  '/m_banner2.png',
+  '/m_banner3.png',
 ];
 
 const getFeatureCardIcon = (feature) => {
@@ -66,27 +54,525 @@ const getCategoryColor = (category) => {
   return '#64748b';
 };
 
+const getExpertLabel = (expert) => {
+  if (!expert) return '';
+  return [expert.name, expert.qualification].filter(Boolean).join(' / ');
+};
+
+const getExpertArticleExcerpt = (article) => {
+  return (
+    article?.summary ||
+    article?.lead_text ||
+    '補助金・助成金の活用について、専門家目線でわかりやすく解説します。'
+  );
+};
+
+function ExpertArticlePreviewCard({ article, expert, navigate }) {
+  const expertLabel = getExpertLabel(expert);
+
+  return (
+    <button
+      type="button"
+      className="top-expert-article-card"
+      onClick={() => navigate(`/expert-articles/${article.slug}`)}
+      style={{
+        width: '100%',
+        display: 'grid',
+        gridTemplateColumns: '88px minmax(0, 1fr)',
+        gap: '14px',
+        alignItems: 'center',
+        textAlign: 'left',
+        backgroundColor: '#ffffff',
+        border: '1px solid #dbe7e4',
+        borderRadius: '12px',
+        padding: '14px',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        boxShadow: '0 8px 18px rgba(15, 23, 42, 0.04)',
+        transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+        minWidth: 0,
+      }}
+      onMouseOver={(e) => {
+        e.currentTarget.style.transform = 'translateY(-2px)';
+        e.currentTarget.style.boxShadow = '0 14px 26px rgba(15, 123, 108, 0.12)';
+        e.currentTarget.style.borderColor = '#0f7b6c';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = '0 8px 18px rgba(15, 23, 42, 0.04)';
+        e.currentTarget.style.borderColor = '#dbe7e4';
+      }}
+    >
+      <div
+        style={{
+          width: '88px',
+          aspectRatio: '4 / 3',
+          borderRadius: '10px',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #ecfdf5 0%, #f8fafc 70%, #eef2f7 100%)',
+          display: 'grid',
+          placeItems: 'center',
+          color: '#0f7b6c',
+          fontSize: '11px',
+          fontWeight: 900,
+          letterSpacing: '0.08em',
+        }}
+      >
+        {article.main_image_url ? (
+          <img
+            src={article.main_image_url}
+            alt=""
+            loading="lazy"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : (
+          <span>Q&A</span>
+        )}
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        {expertLabel && (
+          <div
+            style={{
+              color: '#64748b',
+              fontSize: '12px',
+              fontWeight: 700,
+              marginBottom: '5px',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {expertLabel}
+          </div>
+        )}
+
+        <h4
+          style={{
+            margin: '0 0 6px',
+            color: '#0f172a',
+            fontSize: '15px',
+            lineHeight: 1.45,
+            fontWeight: 800,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {article.title}
+        </h4>
+
+        <p
+          style={{
+            margin: 0,
+            color: '#64748b',
+            fontSize: '12px',
+            lineHeight: 1.6,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {getExpertArticleExcerpt(article)}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+function ExpertArticlesEntrySection({ articles, experts, loading, navigate }) {
+  const hasArticles = articles.length > 0;
+
+  return (
+    <section className="top-expert-qa-section" style={{ marginBottom: '56px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
+          gap: '20px',
+          alignItems: 'stretch',
+          backgroundColor: '#f8fafc',
+          border: '1px solid #dbe7e4',
+          borderRadius: '18px',
+          padding: 'clamp(20px, 4vw, 34px)',
+          boxShadow: '0 12px 30px rgba(15, 23, 42, 0.05)',
+          boxSizing: 'border-box',
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '14px',
+            padding: '24px',
+            border: '1px solid #e5e7eb',
+            minWidth: 0,
+          }}
+        >
+          <div
+            style={{
+              color: '#0f7b6c',
+              fontSize: '12px',
+              fontWeight: 900,
+              letterSpacing: '0.12em',
+              marginBottom: '12px',
+            }}
+          >
+            EXPERT Q&A
+          </div>
+
+          <h3
+            style={{
+              margin: '0 0 14px',
+              color: '#0f172a',
+              fontSize: 'clamp(22px, 3vw, 30px)',
+              lineHeight: 1.35,
+              fontWeight: 900,
+              letterSpacing: 0,
+            }}
+          >
+            専門家に聞く、補助金Q&A
+          </h3>
+
+          <p
+            style={{
+              margin: '0 0 22px',
+              color: '#475569',
+              fontSize: '15px',
+              lineHeight: 1.8,
+            }}
+          >
+            補助金申請のよくある疑問や準備のポイントを、専門家目線のQ&A記事でわかりやすく解説します。
+          </p>
+
+          <button
+            type="button"
+            onClick={() => navigate('/expert-articles')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              backgroundColor: '#0f7b6c',
+              border: 'none',
+              borderRadius: '999px',
+              color: '#ffffff',
+              fontSize: '14px',
+              fontWeight: 800,
+              padding: '12px 20px',
+              cursor: 'pointer',
+              boxShadow: '0 10px 20px rgba(15, 123, 108, 0.18)',
+            }}
+          >
+            専門家Q&A記事を見る <span aria-hidden="true">→</span>
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gap: '12px',
+            alignContent: hasArticles ? 'start' : 'center',
+            minWidth: 0,
+          }}
+        >
+          {hasArticles ? (
+            articles.map((article) => (
+              <ExpertArticlePreviewCard
+                key={article.id}
+                article={article}
+                expert={experts[article.expert_id]}
+                navigate={navigate}
+              />
+            ))
+          ) : (
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                border: '1px dashed #bdd8d2',
+                borderRadius: '14px',
+                padding: '22px',
+                color: '#64748b',
+                fontSize: '14px',
+                lineHeight: 1.7,
+              }}
+            >
+              {loading
+                ? '最新の専門家Q&A記事を確認しています。'
+                : '公開中の専門家Q&A記事を準備中です。記事一覧ページから公開後の記事を確認できます。'}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FeatureHighlightsSection({ featureCards, navigate, colors }) {
+  return (
+    <section className="top-feature-section" style={{ marginBottom: '64px' }}>
+      <div
+        className="top-section-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          paddingBottom: '16px',
+          borderBottom: '1px dashed #94a3b8',
+          marginBottom: '24px',
+        }}
+      >
+        <h3
+          className="top-section-title top-section-title-ja"
+          style={{
+            margin: '0',
+            fontSize: '22px',
+            color: '#0f172a',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontWeight: '800',
+            letterSpacing: '1px',
+          }}
+        >
+          <span style={{ color: '#19aeb8' }}>🔎</span> 人気の特集から探す
+        </h3>
+
+        <button
+          type="button"
+          className="top-section-action"
+          onClick={() => navigate('/features')}
+          style={{
+            backgroundColor: 'transparent',
+            border: '1px solid #19aeb8',
+            borderRadius: '20px',
+            color: '#19aeb8',
+            fontSize: '13px',
+            fontWeight: 'bold',
+            padding: '6px 18px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.backgroundColor = '#19aeb8';
+            e.currentTarget.style.color = 'white';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.color = '#19aeb8';
+          }}
+        >
+          すべての特集を見る
+        </button>
+      </div>
+
+      <div
+        className="top-feature-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+          gap: '12px',
+        }}
+      >
+        {featureCards.map((feature) => (
+          <button
+            key={feature.id || feature.path}
+            type="button"
+            className="top-feature-card"
+            onClick={() => navigate(feature.path)}
+            style={{
+              backgroundColor: 'white',
+              border: `1px solid ${colors.border}`,
+              borderRadius: '8px',
+              padding: '22px 14px 18px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+              transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+              fontFamily: 'inherit',
+              minHeight: '262px',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = 'translateY(-3px)';
+              e.currentTarget.style.boxShadow = '0 10px 22px rgba(25, 174, 184, 0.14)';
+              e.currentTarget.style.borderColor = colors.primary;
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
+              e.currentTarget.style.borderColor = colors.border;
+            }}
+          >
+            {feature.thumbnailUrl ? (
+              <div
+                style={{
+                  width: '100%',
+                  aspectRatio: '16 / 9',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  backgroundColor: '#f1f5f9',
+                  marginBottom: '14px',
+                }}
+              >
+                <img
+                  src={feature.thumbnailUrl}
+                  alt=""
+                  loading="lazy"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+              </div>
+            ) : (
+              <div
+                className="top-feature-icon"
+                style={{
+                  height: '82px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '14px',
+                }}
+              >
+                <FeatureIcon slug={feature.id} color="#0f5f68" size={72} strokeWidth={2.5} />
+              </div>
+            )}
+
+            <h4
+              className="top-feature-card-title"
+              style={{
+                margin: '0 0 10px',
+                color: '#0f172a',
+                fontSize: '14px',
+                lineHeight: 1.55,
+                fontWeight: '800',
+                minHeight: '66px',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {feature.title}
+            </h4>
+
+            <p
+              className="top-feature-card-description"
+              style={{
+                margin: 0,
+                color: colors.textSub,
+                fontSize: '12px',
+                lineHeight: 1.7,
+                display: '-webkit-box',
+                WebkitLineClamp: 4,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                minHeight: '82px',
+              }}
+            >
+              {feature.description}
+            </p>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function TopPage({ recentSubsidies, latestColumns, featureColumns }) {
   const navigate = useNavigate();
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+  const [expertArticles, setExpertArticles] = useState([]);
+  const [expertArticleExperts, setExpertArticleExperts] = useState({});
+  const [expertArticlesLoading, setExpertArticlesLoading] = useState(true);
 
   const featureCards = useMemo(() => {
-    if (featureColumns?.length > 0) {
-      return featureColumns.map((feature) => ({
-        id: feature.id,
-        icon: getFeatureCardIcon(feature),
-        title: feature.title,
-        description:
-          feature.meta_description ||
-          feature.thumbnail_text ||
-          '愛媛県内の補助金・助成金をテーマ別にわかりやすく紹介します。',
-        path: `/column/${feature.slug}`,
-        thumbnailUrl: feature.thumbnail_url,
-      }));
-    }
+    return getTopFeaturePages(6).map((feature) => ({
+      id: feature.slug,
+      icon: feature.icon || getFeatureCardIcon(feature),
+      title: feature.title,
+      description: feature.description,
+      path: feature.path,
+      color: feature.color,
+    }));
+  }, []);
 
-    return FALLBACK_FEATURE_CARDS;
-  }, [featureColumns]);
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchExpertArticles = async () => {
+      if (!supabase) {
+        setExpertArticlesLoading(false);
+        return;
+      }
+
+      setExpertArticlesLoading(true);
+
+      const { data, error } = await supabase
+        .from('expert_articles')
+        .select('id, expert_id, title, slug, summary, lead_text, main_image_url, published_at')
+        .eq('status', 'published')
+        .eq('is_active', true)
+        .not('slug', 'is', null)
+        .neq('slug', '')
+        .order('published_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
+        .limit(3);
+
+      if (error) {
+        console.warn('専門家Q&A記事取得エラー:', error.message || error);
+        if (!cancelled) {
+          setExpertArticles([]);
+          setExpertArticleExperts({});
+          setExpertArticlesLoading(false);
+        }
+        return;
+      }
+
+      const rows = data || [];
+      const expertIds = [...new Set(rows.map((item) => item.expert_id).filter(Boolean))];
+      const nextExperts = {};
+
+      if (expertIds.length > 0) {
+        const { data: expertRows, error: expertError } = await supabase
+          .from('experts')
+          .select('id, name, qualification')
+          .in('id', expertIds);
+
+        if (expertError) {
+          console.warn('専門家情報取得エラー:', expertError.message || expertError);
+        } else {
+          (expertRows || []).forEach((expert) => {
+            nextExperts[expert.id] = expert;
+          });
+        }
+      }
+
+      if (!cancelled) {
+        setExpertArticles(rows);
+        setExpertArticleExperts(nextExperts);
+        setExpertArticlesLoading(false);
+      }
+    };
+
+    fetchExpertArticles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (BANNERS.length <= 1) return undefined;
@@ -117,8 +603,8 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
           marginLeft: 'calc(50% - 50vw)',
           marginRight: 'calc(50% - 50vw)',
           backgroundColor: '#ffffff',
-          padding: '0 0 74px',
-          marginBottom: '64px',
+          padding: '0 0 34px',
+          marginBottom: '38px',
           overflow: 'hidden',
         }}
       >
@@ -170,19 +656,31 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                   backgroundColor: '#ffffff',
                 }}
               >
-                <img
-                  src={banner}
-                  alt={`愛媛県の補助金・助成金ポータルのプロモーションバナー ${index + 1}`}
-                  draggable="false"
+                <picture
                   style={{
                     width: '100%',
                     height: '100%',
                     display: 'block',
-                    objectFit: 'cover',
-                    objectPosition: 'center center',
-                    backgroundColor: '#ffffff',
                   }}
-                />
+                >
+                  <source
+                    media="(max-width: 768px)"
+                    srcSet={MOBILE_BANNERS[index] || banner}
+                  />
+                  <img
+                    src={banner}
+                    alt={`愛媛県の補助金・助成金ポータルのプロモーションバナー ${index + 1}`}
+                    draggable="false"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'block',
+                      objectFit: 'cover',
+                      objectPosition: 'center center',
+                      backgroundColor: '#ffffff',
+                    }}
+                  />
+                </picture>
               </div>
             ))}
           </div>
@@ -437,134 +935,12 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
           </div>
         </div>
 
-        {/* 人気の特集セクション */}
-        <section className="top-feature-section" style={{ marginBottom: '64px' }}>
-          <div
-            className="top-section-header"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              paddingBottom: '16px',
-              borderBottom: '1px dashed #94a3b8',
-              marginBottom: '24px',
-            }}
-          >
-            <h3
-              className="top-section-title top-section-title-ja"
-              style={{
-                margin: '0',
-                fontSize: '22px',
-                color: '#0f172a',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontWeight: '800',
-                letterSpacing: '1px',
-              }}
-            >
-              <span style={{ color: '#19aeb8' }}>🔎</span> 人気の特集から探す
-            </h3>
-          </div>
-
-          <div
-            className="top-feature-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-              gap: '16px',
-            }}
-          >
-            {featureCards.map((feature) => (
-              <button
-                key={feature.id || feature.path}
-                type="button"
-                className="top-feature-card"
-                onClick={() => navigate(feature.path)}
-                style={{
-                  backgroundColor: 'white',
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: '14px',
-                  padding: '22px 20px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                  transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
-                  fontFamily: 'inherit',
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-3px)';
-                  e.currentTarget.style.boxShadow = '0 10px 22px rgba(25, 174, 184, 0.14)';
-                  e.currentTarget.style.borderColor = colors.primary;
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
-                  e.currentTarget.style.borderColor = colors.border;
-                }}
-              >
-                {feature.thumbnailUrl ? (
-                  <div
-                    style={{
-                      width: '100%',
-                      aspectRatio: '16 / 9',
-                      borderRadius: '10px',
-                      overflow: 'hidden',
-                      backgroundColor: '#f1f5f9',
-                      marginBottom: '14px',
-                    }}
-                  >
-                    <img
-                      src={feature.thumbnailUrl}
-                      alt=""
-                      loading="lazy"
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        display: 'block',
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    className="top-feature-icon"
-                    style={{
-                      fontSize: '30px',
-                      lineHeight: 1,
-                      marginBottom: '14px',
-                    }}
-                  >
-                    {feature.icon}
-                  </div>
-                )}
-
-                <h4
-                  style={{
-                    margin: '0 0 10px',
-                    color: '#0f172a',
-                    fontSize: '16px',
-                    lineHeight: 1.5,
-                    fontWeight: '800',
-                  }}
-                >
-                  {feature.title}
-                </h4>
-
-                <p
-                  style={{
-                    margin: 0,
-                    color: colors.textSub,
-                    fontSize: '13px',
-                    lineHeight: 1.7,
-                  }}
-                >
-                  {feature.description}
-                </p>
-              </button>
-            ))}
-          </div>
-        </section>
+        <ExpertArticlesEntrySection
+          articles={expertArticles}
+          experts={expertArticleExperts}
+          loading={expertArticlesLoading}
+          navigate={navigate}
+        />
 
         {/* 新着情報セクション */}
         <div style={{ marginBottom: '48px' }}>
@@ -881,6 +1257,12 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             )}
           </div>
         </div>
+
+        <FeatureHighlightsSection
+          featureCards={featureCards}
+          navigate={navigate}
+          colors={colors}
+        />
 
         {/* シミュレーター起動バナー */}
         <div
