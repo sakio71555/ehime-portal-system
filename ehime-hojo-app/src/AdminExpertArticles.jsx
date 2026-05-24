@@ -106,15 +106,75 @@ function normalizeBase64Image(base64Image) {
     .trim();
 }
 
+const GENERATED_IMAGE_BASE64_KEYS = new Set([
+  'b64_json',
+  'image_base64',
+  'base64_image',
+  'base64Image',
+  'base64',
+  'result',
+]);
+
+const GENERATED_IMAGE_URL_KEYS = new Set([
+  'url',
+  'image_url',
+  'imageUrl',
+  'mainImageUrl',
+  'main_image_url',
+]);
+
+function looksLikeBase64Image(value) {
+  const text = normalizeBase64Image(value);
+  return text.length >= 500 && /^[A-Za-z0-9+/=\r\n_-]+$/.test(text);
+}
+
+function findDeepGeneratedImageString(value, keys, options = {}, seen = new WeakSet(), depth = 0, matchedKey = false) {
+  if (depth > 8 || value == null) return '';
+
+  if (typeof value === 'string') {
+    if (!matchedKey) return '';
+    const text = value.trim();
+    return options.requireBase64Shape && !looksLikeBase64Image(text) ? '' : text;
+  }
+
+  if (typeof value !== 'object') return '';
+  if (seen.has(value)) return '';
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDeepGeneratedImageString(item, keys, options, seen, depth + 1, matchedKey);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const found = findDeepGeneratedImageString(nestedValue, keys, options, seen, depth + 1, matchedKey || keys.has(key));
+    if (found) return found;
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const found = findDeepGeneratedImageString(nestedValue, keys, options, seen, depth + 1, matchedKey);
+    if (found) return found;
+  }
+
+  return '';
+}
+
 function getGeneratedBase64Image(data) {
   return normalizeBase64Image(
     data?.base64Image ||
       data?.imageBase64 ||
       data?.b64_json ||
+      data?.data?.[0]?.b64_json ||
+      data?.data?.[0]?.image?.b64_json ||
+      data?.output?.[0]?.content?.find?.((item) => item?.type === 'output_image')?.image?.b64_json ||
       data?.image?.base64 ||
       data?.image?.b64_json ||
       data?.images?.[0]?.base64 ||
       data?.images?.[0]?.b64_json ||
+      findDeepGeneratedImageString(data, GENERATED_IMAGE_BASE64_KEYS, { requireBase64Shape: true }) ||
       ''
   );
 }
@@ -125,15 +185,35 @@ function getGeneratedImageUrl(data) {
     data?.main_image_url ||
     data?.imageUrl ||
     data?.image_url ||
+    data?.data?.[0]?.url ||
+    data?.data?.[0]?.image?.url ||
     data?.image?.url ||
     data?.images?.[0]?.url ||
+    findDeepGeneratedImageString(data, GENERATED_IMAGE_URL_KEYS) ||
     ''
   );
 }
 
 function formatImageDebug(data) {
   const debug = data?.imageDebug || data?.image_debug;
-  if (!debug || typeof debug !== 'object') return '';
+  if (!debug || typeof debug !== 'object') {
+    if (!data || typeof data !== 'object') return '';
+
+    const firstData = Array.isArray(data?.data) && data.data[0] && typeof data.data[0] === 'object'
+      ? data.data[0]
+      : null;
+    const responseSummary = [
+      `top keys: ${Object.keys(data).slice(0, 12).join(', ') || 'なし'}`,
+      Array.isArray(data?.data) ? `data件数: ${data.data.length}` : 'data配列: なし',
+      firstData ? `data[0] keys: ${Object.keys(firstData).join(', ') || 'なし'}` : '',
+      Array.isArray(data?.output) ? `output件数: ${data.output.length}` : '',
+      `深いb64候補: ${findDeepGeneratedImageString(data, GENERATED_IMAGE_BASE64_KEYS, { requireBase64Shape: true }) ? 'あり' : 'なし'}`,
+      `深いURL候補: ${findDeepGeneratedImageString(data, GENERATED_IMAGE_URL_KEYS) ? 'あり' : 'なし'}`,
+      data?.error?.message ? `OpenAI error: ${data.error.message}` : '',
+    ].filter(Boolean);
+
+    return responseSummary.length ? `\n\nレスポンス情報: ${responseSummary.join(' / ')}` : '';
+  }
 
   const parts = [
     debug.status ? `status: ${debug.status}` : '',
@@ -141,7 +221,9 @@ function formatImageDebug(data) {
     debug.dataLength !== undefined ? `data件数: ${debug.dataLength}` : '',
     Array.isArray(debug.firstKeys) && debug.firstKeys.length ? `data[0] keys: ${debug.firstKeys.join(', ')}` : '',
     debug.hasB64 !== undefined ? `b64_json: ${debug.hasB64 ? 'あり' : 'なし'}` : '',
+    debug.hasDeepB64 !== undefined ? `深いb64候補: ${debug.hasDeepB64 ? 'あり' : 'なし'}` : '',
     debug.hasUrl !== undefined ? `url: ${debug.hasUrl ? 'あり' : 'なし'}` : '',
+    debug.hasDeepUrl !== undefined ? `深いURL候補: ${debug.hasDeepUrl ? 'あり' : 'なし'}` : '',
     debug.error ? `OpenAI error: ${debug.error}` : '',
   ].filter(Boolean);
 

@@ -92,6 +92,71 @@ const nestedImageValue = (item: Record<string, unknown> | null, key: string) => 
   return "";
 };
 
+const IMAGE_BASE64_KEYS = new Set([
+  "b64_json",
+  "image_base64",
+  "base64_image",
+  "base64Image",
+  "base64",
+  "result",
+]);
+
+const IMAGE_URL_KEYS = new Set([
+  "url",
+  "image_url",
+  "imageUrl",
+  "mainImageUrl",
+  "main_image_url",
+]);
+
+const isLikelyBase64Image = (value: string) => {
+  const text = value.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").trim();
+  if (text.length < 500) return false;
+  return /^[A-Za-z0-9+/=\r\n_-]+$/.test(text);
+};
+
+const findDeepImageString = (
+  value: unknown,
+  keys: Set<string>,
+  options: { requireBase64Shape?: boolean } = {},
+  seen = new WeakSet<object>(),
+  depth = 0,
+  matchedKey = false
+): string => {
+  if (depth > 8 || value == null) return "";
+
+  if (typeof value === "string") {
+    if (!matchedKey) return "";
+    return options.requireBase64Shape && !isLikelyBase64Image(value) ? "" : value.trim();
+  }
+
+  if (typeof value !== "object") return "";
+  if (seen.has(value)) return "";
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDeepImageString(item, keys, options, seen, depth + 1, matchedKey);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  const record = value as Record<string, unknown>;
+
+  for (const [key, nestedValue] of Object.entries(record)) {
+    const found = findDeepImageString(nestedValue, keys, options, seen, depth + 1, matchedKey || keys.has(key));
+    if (found) return found;
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    const found = findDeepImageString(nestedValue, keys, options, seen, depth + 1, matchedKey);
+    if (found) return found;
+  }
+
+  return "";
+};
+
 const extractImageBase64 = (imageJson: Record<string, unknown>) => {
   const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
     ? imageJson.data[0] as Record<string, unknown>
@@ -102,7 +167,8 @@ const extractImageBase64 = (imageJson: Record<string, unknown>) => {
     toText(firstData?.b64_json) ||
     nestedImageValue(firstData, "b64_json") ||
     toText(outputImage?.b64_json) ||
-    nestedImageValue(outputImage, "b64_json")
+    nestedImageValue(outputImage, "b64_json") ||
+    findDeepImageString(imageJson, IMAGE_BASE64_KEYS, { requireBase64Shape: true })
   );
 };
 
@@ -116,7 +182,8 @@ const extractImageUrl = (imageJson: Record<string, unknown>) => {
     toText(firstData?.url) ||
     nestedImageValue(firstData, "url") ||
     toText(outputImage?.url) ||
-    nestedImageValue(outputImage, "url")
+    nestedImageValue(outputImage, "url") ||
+    findDeepImageString(imageJson, IMAGE_URL_KEYS)
   );
 };
 
@@ -161,6 +228,8 @@ const buildImageDebug = (imageJson: Record<string, unknown>, response: Response)
     hasB64: Boolean(toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")),
     b64Length: (toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")).length,
     hasUrl: Boolean(toText(firstData?.url) || nestedImageValue(firstData, "url")),
+    hasDeepB64: Boolean(findDeepImageString(imageJson, IMAGE_BASE64_KEYS, { requireBase64Shape: true })),
+    hasDeepUrl: Boolean(findDeepImageString(imageJson, IMAGE_URL_KEYS)),
     outputLength: output.length,
     outputContentTypes,
     error,
