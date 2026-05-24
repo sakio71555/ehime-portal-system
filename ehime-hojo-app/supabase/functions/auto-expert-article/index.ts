@@ -34,6 +34,39 @@ const safeJsonParse = (value: string) => {
   }
 };
 
+const IMAGE_STYLE_CONFIG: Record<string, { label: string; prompt: string }> = {
+  photo: {
+    label: "実写風",
+    prompt:
+      "Professional realistic photo style. Japanese local business setting. Natural lighting. People may appear, but avoid identifiable real persons. Clean, trustworthy editorial photo.",
+  },
+  illustration: {
+    label: "イラスト風",
+    prompt:
+      "Soft editorial illustration style. Warm and approachable. Local business and subsidy consultation theme. Calm composition suitable for a public-service web article.",
+  },
+  business: {
+    label: "ビジネス資料風",
+    prompt:
+      "Clean business editorial visual. Subsidy consultation, documents, charts, and local business support. Professional but friendly. Minimal and polished composition.",
+  },
+  flat: {
+    label: "やさしいフラットイラスト風",
+    prompt:
+      "Friendly flat illustration style. Soft colors. Simple shapes. Local small business support and consultation. Warm, approachable, and easy to understand.",
+  },
+  web_media: {
+    label: "シンプルなWebメディア風",
+    prompt:
+      "Modern web media thumbnail style. Clean composition. Subsidy, expert consultation, and local business. Simple editorial layout without any text.",
+  },
+};
+
+const imageStyleOrDefault = (value: unknown) => {
+  const style = toText(value);
+  return IMAGE_STYLE_CONFIG[style] ? style : "flat";
+};
+
 const buildExpertArticleImagePrompt = ({
   title,
   theme,
@@ -41,7 +74,12 @@ const buildExpertArticleImagePrompt = ({
   region,
   industry,
   imageTheme,
-}: Record<string, string>) => `
+  imageStyle,
+}: Record<string, string>) => {
+  const style = imageStyleOrDefault(imageStyle);
+  const styleConfig = IMAGE_STYLE_CONFIG[style];
+
+  return `
 Create a refined editorial hero image for a Japanese subsidy and grant advisory article.
 
 Subject:
@@ -53,13 +91,21 @@ Context:
 - Industry or topic: ${industry || "subsidies, grants, business support"}
 
 Visual direction:
+- ${styleConfig.prompt}
 - Trustworthy, calm, modern public-service editorial style
-- People reviewing documents or discussing support programs in a bright office or local Ehime-inspired setting
+- People reviewing documents or discussing support programs in a bright office or local Ehime-inspired setting when appropriate for the selected style
 - Subtle hints of Ehime such as citrus, Seto Inland Sea colors, or local business atmosphere
 - Clean composition suitable for a web article thumbnail
-- No text, no logos, no UI screenshots, no distorted hands, no exaggerated expressions
-- Photorealistic or polished editorial illustration style
+- No text
+- No Japanese characters
+- No logos
+- No watermarks
+- No readable signs
+- No UI screenshots
+- Do not include real public figures
+- Avoid distorted hands and exaggerated expressions
 `.trim();
+};
 
 const imageQualityOrDefault = (value: string) => {
   const quality = value.trim();
@@ -239,12 +285,16 @@ const buildImageDebug = (imageJson: Record<string, unknown>, response: Response)
 const generateImage = async ({
   openAiKey,
   prompt,
+  imageStyle,
 }: {
   openAiKey: string;
   prompt: string;
+  imageStyle: string;
 }) => {
   const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
   const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "low");
+  const normalizedImageStyle = imageStyleOrDefault(imageStyle);
+  const imageStyleLabel = IMAGE_STYLE_CONFIG[normalizedImageStyle].label;
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
@@ -263,7 +313,11 @@ const generateImage = async ({
   });
 
   const result = await response.json();
-  const imageDebug = buildImageDebug(result, response);
+  const imageDebug = {
+    ...buildImageDebug(result, response),
+    imageStyle: normalizedImageStyle,
+    imageStyleLabel,
+  };
 
   console.log("image generation response summary", imageDebug);
 
@@ -275,6 +329,8 @@ const generateImage = async ({
         "OpenAIでのアイキャッチ画像生成に失敗しました。",
       imageDebug,
       imageModel,
+      imageStyle: normalizedImageStyle,
+      imageStyleLabel,
     };
   }
 
@@ -288,6 +344,8 @@ const generateImage = async ({
       imageError: "",
       imageDebug,
       imageModel,
+      imageStyle: normalizedImageStyle,
+      imageStyleLabel,
     };
   }
 
@@ -301,6 +359,8 @@ const generateImage = async ({
           imageError: `画像URLの取得に失敗しました。status: ${imageResponse.status}`,
           imageDebug,
           imageModel,
+          imageStyle: normalizedImageStyle,
+          imageStyleLabel,
         };
       }
 
@@ -314,6 +374,8 @@ const generateImage = async ({
           fetchedUrlBytes: imageBuffer.byteLength,
         },
         imageModel,
+        imageStyle: normalizedImageStyle,
+        imageStyleLabel,
       };
     } catch (err) {
       return {
@@ -322,6 +384,8 @@ const generateImage = async ({
         imageError: err instanceof Error ? err.message : "画像URLの取得に失敗しました。",
         imageDebug,
         imageModel,
+        imageStyle: normalizedImageStyle,
+        imageStyleLabel,
       };
     }
   }
@@ -332,6 +396,8 @@ const generateImage = async ({
     imageError: "画像生成APIは成功しましたが、b64_json がありませんでした。",
     imageDebug,
     imageModel,
+    imageStyle: normalizedImageStyle,
+    imageStyleLabel,
   };
 };
 
@@ -366,6 +432,7 @@ serve(async (req: Request) => {
     const imageOnly = Boolean(body?.imageOnly);
     const titleForImage = toText(body?.title);
     const imageTheme = toText(body?.imageTheme) || titleForImage || theme;
+    const imageStyle = imageStyleOrDefault(body?.imageStyle || body?.image_style);
     const recommendedSubsidies = Array.isArray(body?.recommendedSubsidies)
       ? body.recommendedSubsidies
           .slice(0, 8)
@@ -395,12 +462,15 @@ serve(async (req: Request) => {
         region,
         industry,
         imageTheme,
+        imageStyle,
       });
-      const image = await generateImage({ openAiKey, prompt: mainImagePrompt });
+      const image = await generateImage({ openAiKey, prompt: mainImagePrompt, imageStyle });
 
       return jsonResponse({
         ...image,
         mainImagePrompt,
+        imageStyle,
+        imageStyleLabel: IMAGE_STYLE_CONFIG[imageStyle].label,
       });
     }
 

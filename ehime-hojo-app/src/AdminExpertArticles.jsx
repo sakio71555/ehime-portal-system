@@ -30,6 +30,16 @@ const articleStatuses = [
   { value: 'archived', label: 'アーカイブ' },
 ];
 
+const DEFAULT_IMAGE_STYLE = 'flat';
+
+const imageStyleOptions = [
+  { value: 'photo', label: '実写風' },
+  { value: 'illustration', label: 'イラスト風' },
+  { value: 'business', label: 'ビジネス資料風' },
+  { value: 'flat', label: 'やさしいフラットイラスト風' },
+  { value: 'web_media', label: 'シンプルなWebメディア風' },
+];
+
 const emptyQa = () => ({ question: '', answer: '' });
 
 const createEmptyForm = () => ({
@@ -45,6 +55,7 @@ const createEmptyForm = () => ({
   content_html: '',
   closing_text: '',
   main_image_url: '',
+  imageStyle: DEFAULT_IMAGE_STYLE,
   meta_title: '',
   meta_description: '',
   published_at: '',
@@ -96,6 +107,7 @@ function buildContentJson(form) {
       }))
       .filter((item) => item.question || item.answer),
     closing: form.closing_text || '',
+    imageStyle: form.imageStyle || DEFAULT_IMAGE_STYLE,
   };
 }
 
@@ -122,6 +134,10 @@ const GENERATED_IMAGE_URL_KEYS = new Set([
   'mainImageUrl',
   'main_image_url',
 ]);
+
+function getImageStyleLabel(value) {
+  return imageStyleOptions.find((item) => item.value === value)?.label || imageStyleOptions.find((item) => item.value === DEFAULT_IMAGE_STYLE)?.label || 'やさしいフラットイラスト風';
+}
 
 function looksLikeBase64Image(value) {
   const text = normalizeBase64Image(value);
@@ -224,6 +240,8 @@ function formatImageDebug(data) {
     debug.hasDeepB64 !== undefined ? `深いb64候補: ${debug.hasDeepB64 ? 'あり' : 'なし'}` : '',
     debug.hasUrl !== undefined ? `url: ${debug.hasUrl ? 'あり' : 'なし'}` : '',
     debug.hasDeepUrl !== undefined ? `深いURL候補: ${debug.hasDeepUrl ? 'あり' : 'なし'}` : '',
+    debug.imageStyleLabel ? `画像スタイル: ${debug.imageStyleLabel}` : '',
+    !debug.imageStyleLabel && debug.imageStyle ? `画像スタイル: ${debug.imageStyle}` : '',
     debug.error ? `OpenAI error: ${debug.error}` : '',
   ].filter(Boolean);
 
@@ -280,6 +298,7 @@ export default function AdminExpertArticles() {
   const [generating, setGenerating] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [deletingArticleId, setDeletingArticleId] = useState(null);
   const [imageError, setImageError] = useState('');
   const [message, setMessage] = useState('');
   const [aiForm, setAiForm] = useState({
@@ -393,6 +412,7 @@ export default function AdminExpertArticles() {
       content_html: article.content_html || '',
       closing_text: article.closing_text || content.closing || '',
       main_image_url: article.main_image_url || '',
+      imageStyle: content.imageStyle || DEFAULT_IMAGE_STYLE,
       meta_title: article.meta_title || '',
       meta_description: article.meta_description || '',
       published_at: article.published_at
@@ -663,6 +683,9 @@ export default function AdminExpertArticles() {
     setImageError('');
     setMessage('');
 
+    const imageStyle = form.imageStyle || DEFAULT_IMAGE_STYLE;
+    const imageStyleLabel = getImageStyleLabel(imageStyle);
+
     try {
       const { data, error } = await supabase.functions.invoke('auto-expert-article', {
         body: {
@@ -673,15 +696,16 @@ export default function AdminExpertArticles() {
           industry: aiForm.industry,
           region: aiForm.region,
           imageTheme,
+          imageStyle,
         },
       });
 
       if (error) {
-        throw new Error(error.message || 'AI画像生成通信に失敗しました。');
+        throw new Error(`画像生成スタイル: ${imageStyleLabel}\n${error.message || 'AI画像生成通信に失敗しました。'}`);
       }
 
       if (data?.error) {
-        throw new Error(data.error);
+        throw new Error(`画像生成スタイル: ${imageStyleLabel}\n${data.error}`);
       }
 
       const generatedImageError = data?.imageError || data?.image_error || '';
@@ -697,7 +721,7 @@ export default function AdminExpertArticles() {
 
       if (!base64Image) {
         throw new Error(
-          `${generatedImageError || '画像生成は完了しましたが、画像データが返りませんでした。'}${formatImageDebug(data)}`
+          `画像生成スタイル: ${imageStyleLabel}\n${generatedImageError || '画像生成は完了しましたが、画像データが返りませんでした。'}${formatImageDebug(data)}`
         );
       }
 
@@ -706,7 +730,7 @@ export default function AdminExpertArticles() {
       updateForm('main_image_url', publicUrl);
       setMessage('AIでアイキャッチ画像を生成しました。保存すると記事に反映されます。');
     } catch (err) {
-      setImageError(err instanceof Error ? err.message : 'AI画像生成に失敗しました。');
+      setImageError(err instanceof Error ? err.message : `画像生成スタイル: ${imageStyleLabel}\nAI画像生成に失敗しました。`);
     } finally {
       setGeneratingImage(false);
     }
@@ -821,6 +845,54 @@ export default function AdminExpertArticles() {
     }
 
     await loadArticles();
+  };
+
+  const deleteArticle = async (article) => {
+    const confirmed = confirm(
+      `この記事を完全に削除しますか？\n\n「${article.title}」\n\n関連するおすすめ補助金の紐づけも削除されます。\nこの操作は元に戻せません。`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingArticleId(article.id);
+    setMessage('');
+
+    try {
+      const { error: linkError } = await supabase
+        .from('expert_article_subsidies')
+        .delete()
+        .eq('expert_article_id', article.id);
+
+      if (linkError) {
+        setMessage(`おすすめ補助金の紐づけ削除エラー: ${linkError.message}`);
+        return;
+      }
+
+      const { error: articleError } = await supabase
+        .from('expert_articles')
+        .delete()
+        .eq('id', article.id);
+
+      if (articleError) {
+        setMessage(`専門家記事の削除エラー: ${articleError.message}`);
+        return;
+      }
+
+      setArticles((prev) => prev.filter((item) => item.id !== article.id));
+      setArticleSubsidyCounts((prev) => {
+        const next = { ...prev };
+        delete next[article.id];
+        return next;
+      });
+
+      if (String(form.id || '') === String(article.id)) {
+        resetForm();
+      }
+
+      setMessage(`「${article.title}」を削除しました。`);
+    } finally {
+      setDeletingArticleId(null);
+    }
   };
 
   return (
@@ -961,6 +1033,22 @@ export default function AdminExpertArticles() {
                       AI生成または手動アップロードで、記事一覧・詳細に表示する画像を設定します。
                     </p>
                   </div>
+                </div>
+
+                <div className="admin-expert-image-controls" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 280px) minmax(0, 1fr)', gap: '12px', alignItems: 'end', marginBottom: '14px' }}>
+                  <Field label="画像生成スタイル">
+                    <select
+                      value={form.imageStyle || DEFAULT_IMAGE_STYLE}
+                      onChange={(e) => updateForm('imageStyle', e.target.value)}
+                      style={inputStyle}
+                    >
+                      {imageStyleOptions.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       type="button"
@@ -1211,6 +1299,19 @@ export default function AdminExpertArticles() {
                         アーカイブ
                       </button>
                     )}
+                    <button
+                      onClick={() => deleteArticle(article)}
+                      disabled={deletingArticleId === article.id}
+                      style={{
+                        ...secondaryButtonStyle,
+                        color: '#b91c1c',
+                        borderColor: '#fecaca',
+                        background: '#fef2f2',
+                        opacity: deletingArticleId === article.id ? 0.65 : 1,
+                      }}
+                    >
+                      {deletingArticleId === article.id ? '削除中...' : '削除'}
+                    </button>
                   </div>
                 </article>
               ))}
@@ -1228,6 +1329,10 @@ export default function AdminExpertArticles() {
           }
 
           .admin-expert-image-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .admin-expert-image-controls {
             grid-template-columns: 1fr !important;
           }
         }
