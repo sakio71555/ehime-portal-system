@@ -110,11 +110,42 @@ function getGeneratedBase64Image(data) {
   return normalizeBase64Image(
     data?.base64Image ||
       data?.imageBase64 ||
+      data?.b64_json ||
       data?.image?.base64 ||
       data?.image?.b64_json ||
       data?.images?.[0]?.base64 ||
+      data?.images?.[0]?.b64_json ||
       ''
   );
+}
+
+function getGeneratedImageUrl(data) {
+  return (
+    data?.mainImageUrl ||
+    data?.main_image_url ||
+    data?.imageUrl ||
+    data?.image_url ||
+    data?.image?.url ||
+    data?.images?.[0]?.url ||
+    ''
+  );
+}
+
+function formatImageDebug(data) {
+  const debug = data?.imageDebug || data?.image_debug;
+  if (!debug || typeof debug !== 'object') return '';
+
+  const parts = [
+    debug.status ? `status: ${debug.status}` : '',
+    debug.hasDataArray !== undefined ? `data配列: ${debug.hasDataArray ? 'あり' : 'なし'}` : '',
+    debug.dataLength !== undefined ? `data件数: ${debug.dataLength}` : '',
+    Array.isArray(debug.firstKeys) && debug.firstKeys.length ? `data[0] keys: ${debug.firstKeys.join(', ')}` : '',
+    debug.hasB64 !== undefined ? `b64_json: ${debug.hasB64 ? 'あり' : 'なし'}` : '',
+    debug.hasUrl !== undefined ? `url: ${debug.hasUrl ? 'あり' : 'なし'}` : '',
+    debug.error ? `OpenAI error: ${debug.error}` : '',
+  ].filter(Boolean);
+
+  return parts.length ? `\n\nデバッグ情報: ${parts.join(' / ')}` : '';
 }
 
 function base64ToBlob(base64Image) {
@@ -571,11 +602,21 @@ export default function AdminExpertArticles() {
         throw new Error(data.error);
       }
 
-      const base64Image = getGeneratedBase64Image(data);
       const generatedImageError = data?.imageError || data?.image_error || '';
+      const generatedImageUrl = getGeneratedImageUrl(data);
+
+      if (generatedImageUrl) {
+        updateForm('main_image_url', generatedImageUrl);
+        setMessage('AIでアイキャッチ画像を生成しました。保存すると記事に反映されます。');
+        return;
+      }
+
+      const base64Image = getGeneratedBase64Image(data);
 
       if (!base64Image) {
-        throw new Error(generatedImageError || '画像生成は完了しましたが、画像データが返りませんでした。');
+        throw new Error(
+          `${generatedImageError || '画像生成は完了しましたが、画像データが返りませんでした。'}${formatImageDebug(data)}`
+        );
       }
 
       const blob = base64ToBlob(base64Image);
@@ -931,6 +972,7 @@ export default function AdminExpertArticles() {
                           color: '#9a3412',
                           fontSize: '13px',
                           lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
                         }}
                       >
                         {imageError}

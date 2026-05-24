@@ -61,6 +61,112 @@ Visual direction:
 - Photorealistic or polished editorial illustration style
 `.trim();
 
+const imageQualityOrDefault = (value: string) => {
+  const quality = value.trim();
+  return ["low", "medium", "high", "auto"].includes(quality) ? quality : "low";
+};
+
+const outputImageItem = (imageJson: Record<string, unknown>) => {
+  const output = Array.isArray(imageJson?.output) ? imageJson.output : [];
+  for (const outputItem of output) {
+    if (!outputItem || typeof outputItem !== "object") continue;
+    const content = Array.isArray((outputItem as Record<string, unknown>).content)
+      ? ((outputItem as Record<string, unknown>).content as unknown[])
+      : [];
+    const imageItem = content.find(
+      (item) => item && typeof item === "object" && (item as Record<string, unknown>).type === "output_image"
+    );
+    if (imageItem && typeof imageItem === "object") {
+      return imageItem as Record<string, unknown>;
+    }
+  }
+  return null;
+};
+
+const nestedImageValue = (item: Record<string, unknown> | null, key: string) => {
+  if (!item) return "";
+  const image = item.image;
+  if (image && typeof image === "object") {
+    return toText((image as Record<string, unknown>)[key]);
+  }
+  return "";
+};
+
+const extractImageBase64 = (imageJson: Record<string, unknown>) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const outputImage = outputImageItem(imageJson);
+
+  return (
+    toText(firstData?.b64_json) ||
+    nestedImageValue(firstData, "b64_json") ||
+    toText(outputImage?.b64_json) ||
+    nestedImageValue(outputImage, "b64_json")
+  );
+};
+
+const extractImageUrl = (imageJson: Record<string, unknown>) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const outputImage = outputImageItem(imageJson);
+
+  return (
+    toText(firstData?.url) ||
+    nestedImageValue(firstData, "url") ||
+    toText(outputImage?.url) ||
+    nestedImageValue(outputImage, "url")
+  );
+};
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+};
+
+const buildImageDebug = (imageJson: Record<string, unknown>, response: Response) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const output = Array.isArray(imageJson?.output) ? imageJson.output : [];
+  const outputContentTypes = output.flatMap((outputItem) => {
+    if (!outputItem || typeof outputItem !== "object") return [];
+    const content = Array.isArray((outputItem as Record<string, unknown>).content)
+      ? ((outputItem as Record<string, unknown>).content as unknown[])
+      : [];
+    return content
+      .filter((item) => item && typeof item === "object")
+      .map((item) => toText((item as Record<string, unknown>).type))
+      .filter(Boolean);
+  });
+  const error = imageJson?.error && typeof imageJson.error === "object"
+    ? toText((imageJson.error as Record<string, unknown>).message)
+    : null;
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    hasDataArray: Array.isArray(imageJson?.data),
+    dataLength: Array.isArray(imageJson?.data) ? imageJson.data.length : 0,
+    firstKeys: firstData ? Object.keys(firstData) : [],
+    hasB64: Boolean(toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")),
+    b64Length: (toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")).length,
+    hasUrl: Boolean(toText(firstData?.url) || nestedImageValue(firstData, "url")),
+    outputLength: output.length,
+    outputContentTypes,
+    error,
+  };
+};
+
 const generateImage = async ({
   openAiKey,
   prompt,
@@ -69,7 +175,7 @@ const generateImage = async ({
   prompt: string;
 }) => {
   const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
-  const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
+  const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "low");
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
@@ -82,11 +188,15 @@ const generateImage = async ({
       prompt,
       size: "1024x1024",
       quality: imageQuality,
+      output_format: "png",
       n: 1,
     }),
   });
 
   const result = await response.json();
+  const imageDebug = buildImageDebug(result, response);
+
+  console.log("image generation response summary", imageDebug);
 
   if (!response.ok) {
     return {
@@ -94,13 +204,64 @@ const generateImage = async ({
       imageError:
         result?.error?.message ||
         "OpenAIでのアイキャッチ画像生成に失敗しました。",
+      imageDebug,
       imageModel,
     };
   }
 
+  const base64Image = extractImageBase64(result);
+  const imageUrl = extractImageUrl(result);
+
+  if (base64Image) {
+    return {
+      base64Image,
+      imageUrl,
+      imageError: "",
+      imageDebug,
+      imageModel,
+    };
+  }
+
+  if (imageUrl) {
+    try {
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) {
+        return {
+          base64Image: "",
+          imageUrl,
+          imageError: `画像URLの取得に失敗しました。status: ${imageResponse.status}`,
+          imageDebug,
+          imageModel,
+        };
+      }
+
+      const imageBuffer = await imageResponse.arrayBuffer();
+      return {
+        base64Image: arrayBufferToBase64(imageBuffer),
+        imageUrl,
+        imageError: "",
+        imageDebug: {
+          ...imageDebug,
+          fetchedUrlBytes: imageBuffer.byteLength,
+        },
+        imageModel,
+      };
+    } catch (err) {
+      return {
+        base64Image: "",
+        imageUrl,
+        imageError: err instanceof Error ? err.message : "画像URLの取得に失敗しました。",
+        imageDebug,
+        imageModel,
+      };
+    }
+  }
+
   return {
-    base64Image: result?.data?.[0]?.b64_json || "",
-    imageError: "",
+    base64Image: "",
+    imageUrl: "",
+    imageError: "画像生成APIは成功しましたが、b64_json がありませんでした。",
+    imageDebug,
     imageModel,
   };
 };
