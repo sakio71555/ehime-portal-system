@@ -18,6 +18,22 @@ const SUPABASE_ANON_KEY =
 
 const OUTPUT_PATH = path.resolve('public/sitemap.xml');
 
+const FEATURE_ROUTES = [
+  '/feature/construction',
+  '/feature/restaurant-retail',
+  '/feature/startup-digital',
+  '/feature/manufacturing',
+  '/feature/agriculture',
+  '/feature/tourism',
+  '/feature/beauty-salon',
+  '/feature/medical-welfare',
+  '/feature/housing-renovation',
+  '/feature/childcare-family',
+  '/feature/energy-equipment',
+  '/feature/sales-channel',
+  '/feature/personal-assistance',
+];
+
 const STATIC_ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
   { path: '/search', changefreq: 'daily', priority: '0.9' },
@@ -31,28 +47,12 @@ const STATIC_ROUTES = [
   { path: '/purpose/startup', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/energy-saving', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/digital', changefreq: 'daily', priority: '0.85' },
-  { path: '/feature/construction', changefreq: 'daily', priority: '0.85' },
-  { path: '/feature/restaurant-retail', changefreq: 'daily', priority: '0.85' },
-  { path: '/feature/startup-digital', changefreq: 'daily', priority: '0.85' },
-];
-
-const SEO_SEARCH_KEYWORDS = [
-  '松山市',
-  '今治市',
-  '西予市',
-  '宇和島市',
-  '四国中央市',
-  '新居浜市',
-  '西条市',
-  '大洲市',
-  '創業',
-  '設備',
-  '省エネ',
-  'IT',
-  '販路',
-  '農業',
-  '観光',
-  '人材',
+  { path: '/features', changefreq: 'weekly', priority: '0.85' },
+  ...FEATURE_ROUTES.map((path) => ({
+    path,
+    changefreq: 'daily',
+    priority: '0.85',
+  })),
 ];
 
 function normalizeSiteUrl(url) {
@@ -145,6 +145,8 @@ async function fetchAllPublishedSubsidies(supabase) {
       .select('id, fetched_at')
       .eq('is_active', true)
       .eq('crawl_status', 'published')
+      .is('duplicate_of_id', null)
+      .order('id', { ascending: true })
       .range(from, to);
 
     if (error) {
@@ -173,6 +175,7 @@ async function fetchAllPublishedColumns(supabase) {
       .from('columns')
       .select('slug, published_at')
       .eq('is_published', true)
+      .order('slug', { ascending: true })
       .range(from, to);
 
     if (error) {
@@ -218,15 +221,6 @@ async function main() {
     })
   );
 
-  const seoSearchEntries = SEO_SEARCH_KEYWORDS.map((keyword) =>
-    toUrlEntry({
-      loc: buildUrl(`/search?keyword=${encodeURIComponent(keyword)}`),
-      lastmod: today,
-      changefreq: 'weekly',
-      priority: '0.75',
-    })
-  );
-
   const subsidies = await fetchAllPublishedSubsidies(supabase);
 
   const subsidyEntries = subsidies
@@ -257,7 +251,7 @@ async function main() {
 <urlset
   xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
 >
-${[...staticEntries, ...seoSearchEntries, ...subsidyEntries, ...columnEntries].join('\n')}
+${[...staticEntries, ...subsidyEntries, ...columnEntries].join('\n')}
 </urlset>
 `;
 
@@ -267,13 +261,11 @@ ${[...staticEntries, ...seoSearchEntries, ...subsidyEntries, ...columnEntries].j
   console.log('✅ sitemap.xml 生成完了');
   console.log(`出力先: ${OUTPUT_PATH}`);
   console.log(`静的ページ: ${staticEntries.length} 件`);
-  console.log(`SEO検索ページ: ${seoSearchEntries.length} 件`);
   console.log(`補助金詳細: ${subsidyEntries.length} 件`);
   console.log(`コラム詳細: ${columnEntries.length} 件`);
   console.log(
     `合計: ${
       staticEntries.length +
-      seoSearchEntries.length +
       subsidyEntries.length +
       columnEntries.length
     } 件`
