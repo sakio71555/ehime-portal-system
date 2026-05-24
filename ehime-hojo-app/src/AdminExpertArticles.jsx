@@ -81,9 +81,9 @@ function formatDate(value) {
   return date.toLocaleDateString('ja-JP');
 }
 
-function toNumberOrNull(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function toUuidOrNull(value) {
+  const text = String(value || '').trim();
+  return text || null;
 }
 
 function buildContentJson(form) {
@@ -97,6 +97,40 @@ function buildContentJson(form) {
       .filter((item) => item.question || item.answer),
     closing: form.closing_text || '',
   };
+}
+
+function normalizeBase64Image(base64Image) {
+  if (!base64Image) return '';
+  return String(base64Image)
+    .replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '')
+    .trim();
+}
+
+function getGeneratedBase64Image(data) {
+  return normalizeBase64Image(
+    data?.base64Image ||
+      data?.imageBase64 ||
+      data?.image?.base64 ||
+      data?.image?.b64_json ||
+      data?.images?.[0]?.base64 ||
+      ''
+  );
+}
+
+function base64ToBlob(base64Image) {
+  const normalizedBase64 = normalizeBase64Image(base64Image);
+  if (!normalizedBase64) {
+    throw new Error('画像データが空です。');
+  }
+
+  const byteCharacters = atob(normalizedBase64);
+  const byteNumbers = new Array(byteCharacters.length);
+
+  for (let i = 0; i < byteCharacters.length; i += 1) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+
+  return new Blob([new Uint8Array(byteNumbers)], { type: 'image/png' });
 }
 
 function getArticleQa(article) {
@@ -131,6 +165,9 @@ export default function AdminExpertArticles() {
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState('');
   const [message, setMessage] = useState('');
   const [aiForm, setAiForm] = useState({
     theme: '',
@@ -223,6 +260,7 @@ export default function AdminExpertArticles() {
     setSelectedSubsidies([]);
     setSubsidyQuery('');
     setSubsidyResults([]);
+    setImageError('');
     setMessage('');
   };
 
@@ -250,6 +288,7 @@ export default function AdminExpertArticles() {
       qa: getArticleQa(article),
     });
 
+    setImageError('');
     await loadArticleSubsidies(article.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -402,7 +441,7 @@ export default function AdminExpertArticles() {
 
     const { data, error } = await supabase.functions.invoke('auto-expert-article', {
       body: {
-        expertId: form.expert_id ? Number(form.expert_id) : null,
+        expertId: form.expert_id || null,
         expertName: expert?.name || '',
         ...aiForm,
         recommendedSubsidies,
@@ -438,6 +477,118 @@ export default function AdminExpertArticles() {
     setMessage('AIインタビュー記事の下書きを生成しました。内容を確認して保存してください。');
   };
 
+  const uploadExpertArticleImage = async (fileOrBlob, prefix = 'expert_article') => {
+    if (!fileOrBlob) {
+      throw new Error('アップロードする画像がありません。');
+    }
+
+    const contentType = fileOrBlob.type || 'image/png';
+    const extension = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png';
+    const safeSlug = createSlug(form.slug || form.title || aiForm.theme || 'expert-article').slice(0, 48);
+    const fileName = `${prefix}/${Date.now()}-${safeSlug}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('column-images')
+      .upload(fileName, fileOrBlob, {
+        contentType,
+        cacheControl: '31536000',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    return supabase.storage.from('column-images').getPublicUrl(fileName).data.publicUrl;
+  };
+
+  const handleManualImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setImageError('画像ファイルを選択してください。');
+      return;
+    }
+
+    setUploadingImage(true);
+    setImageError('');
+    setMessage('');
+
+    try {
+      const publicUrl = await uploadExpertArticleImage(file, 'expert_article_upload');
+      updateForm('main_image_url', publicUrl);
+      setMessage('アイキャッチ画像をアップロードしました。保存すると記事に反映されます。');
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : '画像アップロードに失敗しました。');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleGenerateArticleImage = async () => {
+    const imageTheme = [
+      form.title,
+      form.summary,
+      form.lead_text,
+      aiForm.theme,
+      aiForm.targetReader,
+      aiForm.industry,
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    if (!imageTheme) {
+      setImageError('AI画像生成には、タイトル・テーマ・リード文のいずれかが必要です。');
+      return;
+    }
+
+    setGeneratingImage(true);
+    setImageError('');
+    setMessage('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('auto-expert-article', {
+        body: {
+          imageOnly: true,
+          title: form.title || aiForm.theme,
+          theme: aiForm.theme || form.title,
+          targetReader: aiForm.targetReader,
+          industry: aiForm.industry,
+          region: aiForm.region,
+          imageTheme,
+        },
+      });
+
+      if (error) {
+        throw new Error(error.message || 'AI画像生成通信に失敗しました。');
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      const base64Image = getGeneratedBase64Image(data);
+      const generatedImageError = data?.imageError || data?.image_error || '';
+
+      if (!base64Image) {
+        throw new Error(generatedImageError || '画像生成は完了しましたが、画像データが返りませんでした。');
+      }
+
+      const blob = base64ToBlob(base64Image);
+      const publicUrl = await uploadExpertArticleImage(blob, 'expert_article_ai');
+      updateForm('main_image_url', publicUrl);
+      setMessage('AIでアイキャッチ画像を生成しました。保存すると記事に反映されます。');
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'AI画像生成に失敗しました。');
+    } finally {
+      setGeneratingImage(false);
+    }
+  };
+
   const saveArticle = async (nextStatus = form.status) => {
     if (!form.title.trim()) {
       alert('タイトルを入力してください。');
@@ -463,7 +614,7 @@ export default function AdminExpertArticles() {
           : null;
 
     const payload = {
-      expert_id: toNumberOrNull(form.expert_id),
+      expert_id: toUuidOrNull(form.expert_id),
       title: form.title.trim(),
       slug,
       summary: form.summary.trim() || null,
@@ -671,14 +822,130 @@ export default function AdminExpertArticles() {
                 <textarea value={form.content_html} onChange={(e) => updateForm('content_html', e.target.value)} rows={5} placeholder="<h2>見出し</h2><p>本文...</p>" style={textareaStyle} />
               </Field>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                <Field label="アイキャッチ画像URL">
-                  <input value={form.main_image_url} onChange={(e) => updateForm('main_image_url', e.target.value)} style={inputStyle} />
-                </Field>
-                <Field label="公開日時">
-                  <input type="datetime-local" value={form.published_at} onChange={(e) => updateForm('published_at', e.target.value)} style={inputStyle} />
-                </Field>
-              </div>
+              <section
+                style={{
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '14px',
+                  padding: '16px',
+                  background: '#f8fafc',
+                  marginBottom: '18px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                  <div>
+                    <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '16px' }}>🖼 アイキャッチ画像</h3>
+                    <p style={{ margin: 0, color: colors.muted, fontSize: '12px', lineHeight: 1.6 }}>
+                      AI生成または手動アップロードで、記事一覧・詳細に表示する画像を設定します。
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={handleGenerateArticleImage}
+                      disabled={generatingImage}
+                      style={{ ...primaryButtonStyle, padding: '0 14px', minHeight: '40px' }}
+                    >
+                      {generatingImage ? '画像生成中...' : 'AIで画像生成'}
+                    </button>
+                    <label
+                      htmlFor="expert-article-image-upload"
+                      style={{
+                        ...secondaryButtonStyle,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minHeight: '40px',
+                        cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                        opacity: uploadingImage ? 0.7 : 1,
+                      }}
+                    >
+                      {uploadingImage ? 'アップロード中...' : '画像アップロード'}
+                    </label>
+                    <input
+                      id="expert-article-image-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleManualImageUpload}
+                      disabled={uploadingImage}
+                      style={{ display: 'none' }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  className="admin-expert-image-grid"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '220px minmax(0, 1fr)',
+                    gap: '14px',
+                    alignItems: 'stretch',
+                  }}
+                >
+                  <div
+                    style={{
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      background: '#ffffff',
+                      minHeight: '140px',
+                    }}
+                  >
+                    {form.main_image_url ? (
+                      <img
+                        src={form.main_image_url}
+                        alt=""
+                        style={{ width: '100%', height: '100%', minHeight: '140px', objectFit: 'cover', display: 'block' }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          minHeight: '140px',
+                          display: 'grid',
+                          placeItems: 'center',
+                          color: '#94a3b8',
+                          fontWeight: 900,
+                          background: 'linear-gradient(135deg, #ecfdf5 0%, #f8fafc 100%)',
+                        }}
+                      >
+                        No Image
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <Field label="画像URL">
+                      <input
+                        value={form.main_image_url}
+                        onChange={(e) => updateForm('main_image_url', e.target.value)}
+                        placeholder="https://... またはアップロード後のURL"
+                        style={inputStyle}
+                      />
+                    </Field>
+                    {imageError && (
+                      <div
+                        style={{
+                          marginTop: '10px',
+                          padding: '10px 12px',
+                          borderRadius: '10px',
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          color: '#9a3412',
+                          fontSize: '13px',
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {imageError}
+                      </div>
+                    )}
+                    <p style={{ margin: '10px 0 0', color: colors.muted, fontSize: '12px', lineHeight: 1.6 }}>
+                      AI画像生成だけ失敗しても記事編集は続けられます。保存ボタンを押すまでDBには反映されません。
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <Field label="公開日時">
+                <input type="datetime-local" value={form.published_at} onChange={(e) => updateForm('published_at', e.target.value)} style={inputStyle} />
+              </Field>
 
               <Field label="meta title">
                 <input value={form.meta_title} onChange={(e) => updateForm('meta_title', e.target.value)} style={inputStyle} />
@@ -778,7 +1045,27 @@ export default function AdminExpertArticles() {
           ) : articles.length ? (
             <div style={{ display: 'grid', gap: '12px' }}>
               {articles.map((article) => (
-                <article key={article.id} style={{ border: `1px solid ${colors.border}`, borderRadius: '12px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr auto', gap: '16px', alignItems: 'center' }}>
+                <article key={article.id} className="admin-expert-article-row" style={{ border: `1px solid ${colors.border}`, borderRadius: '12px', padding: '16px', display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr) auto', gap: '16px', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: '96px',
+                      height: '72px',
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      background: '#eef2f7',
+                      color: '#94a3b8',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: '12px',
+                      fontWeight: 900,
+                    }}
+                  >
+                    {article.main_image_url ? (
+                      <img src={article.main_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    ) : (
+                      'No Image'
+                    )}
+                  </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
                       <span style={statusBadgeStyle(article.status)}>{article.status}</span>
@@ -815,11 +1102,19 @@ export default function AdminExpertArticles() {
           main section > div[style*="grid-template-columns: minmax(0, 1fr) minmax(320px, 420px)"] {
             grid-template-columns: 1fr !important;
           }
+
+          .admin-expert-image-grid {
+            grid-template-columns: 1fr !important;
+          }
         }
 
         @media (max-width: 640px) {
           input, textarea, select, button {
             font-size: 16px !important;
+          }
+
+          .admin-expert-article-row {
+            grid-template-columns: 1fr !important;
           }
         }
       `}</style>

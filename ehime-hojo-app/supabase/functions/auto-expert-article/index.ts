@@ -34,6 +34,77 @@ const safeJsonParse = (value: string) => {
   }
 };
 
+const buildExpertArticleImagePrompt = ({
+  title,
+  theme,
+  targetReader,
+  region,
+  industry,
+  imageTheme,
+}: Record<string, string>) => `
+Create a refined editorial hero image for a Japanese subsidy and grant advisory article.
+
+Subject:
+${imageTheme || title || theme}
+
+Context:
+- Region: ${region || "Ehime, Japan"}
+- Audience: ${targetReader || "small business owners and local residents in Ehime"}
+- Industry or topic: ${industry || "subsidies, grants, business support"}
+
+Visual direction:
+- Trustworthy, calm, modern public-service editorial style
+- People reviewing documents or discussing support programs in a bright office or local Ehime-inspired setting
+- Subtle hints of Ehime such as citrus, Seto Inland Sea colors, or local business atmosphere
+- Clean composition suitable for a web article thumbnail
+- No text, no logos, no UI screenshots, no distorted hands, no exaggerated expressions
+- Photorealistic or polished editorial illustration style
+`.trim();
+
+const generateImage = async ({
+  openAiKey,
+  prompt,
+}: {
+  openAiKey: string;
+  prompt: string;
+}) => {
+  const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
+  const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
+
+  const response = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openAiKey}`,
+    },
+    body: JSON.stringify({
+      model: imageModel,
+      prompt,
+      size: "1024x1024",
+      quality: imageQuality,
+      n: 1,
+    }),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    return {
+      base64Image: "",
+      imageError:
+        result?.error?.message ||
+        "OpenAIでのアイキャッチ画像生成に失敗しました。",
+      imageModel,
+    };
+  }
+
+  return {
+    base64Image: result?.data?.[0]?.b64_json || "",
+    imageError: "",
+    imageModel,
+  };
+};
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -62,6 +133,9 @@ serve(async (req: Request) => {
     const goal = toText(body?.goal);
     const tone = toText(body?.tone) || "やさしく、専門用語を少なめに";
     const questionCount = toNumber(body?.questionCount, 6);
+    const imageOnly = Boolean(body?.imageOnly);
+    const titleForImage = toText(body?.title);
+    const imageTheme = toText(body?.imageTheme) || titleForImage || theme;
     const recommendedSubsidies = Array.isArray(body?.recommendedSubsidies)
       ? body.recommendedSubsidies
           .slice(0, 8)
@@ -75,6 +149,30 @@ serve(async (req: Request) => {
           }))
           .filter((item) => item.title)
       : [];
+
+    if (imageOnly) {
+      if (!imageTheme) {
+        return jsonResponse(
+          { error: "画像生成にはタイトル、テーマ、または画像テーマが必要です。" },
+          200
+        );
+      }
+
+      const mainImagePrompt = buildExpertArticleImagePrompt({
+        title: titleForImage,
+        theme,
+        targetReader,
+        region,
+        industry,
+        imageTheme,
+      });
+      const image = await generateImage({ openAiKey, prompt: mainImagePrompt });
+
+      return jsonResponse({
+        ...image,
+        mainImagePrompt,
+      });
+    }
 
     if (!theme) {
       return jsonResponse({ error: "テーマを入力してください。" }, 200);
@@ -90,6 +188,10 @@ serve(async (req: Request) => {
 - 架空の補助金名、金額、申請期間を作らないでください。
 - おすすめ補助金として渡された制度以外を断定的に紹介しないでください。
 - 申請条件・募集期間・対象経費は変更されるため、公式情報と専門家確認が必要と明記してください。
+- 回答は短いFAQではなく、専門家が丁寧に説明している読み物にしてください。
+- 各回答は目安として5〜8文程度にし、結論、背景、実務上の注意点、愛媛県内の事業者・利用者が気をつけたい視点を自然に含めてください。
+- 毎回同じ言い回しで締めず、質問ごとに答え方のリズムを変えてください。
+- 文章はやさしく丁寧にしつつ、内容は具体的にしてください。
 - JSONだけを返してください。Markdownのコードフェンスは禁止です。
 `;
 
@@ -113,11 +215,14 @@ ${recommendedSubsidies.length ? JSON.stringify(recommendedSubsidies, null, 2) : 
   "title": "記事タイトル",
   "slug": "英数字とハイフンのみのURLスラッグ",
   "summary": "一覧用の短い説明文",
-  "leadText": "記事冒頭のリード文",
+  "leadText": "記事冒頭のリード文。2〜3文で読者の課題とこの記事で分かることを説明",
   "qa": [
-    { "question": "質問", "answer": "回答" }
+    {
+      "question": "自然なインタビュー質問",
+      "answer": "読み応えのある回答。結論、背景、注意点、地域・業種の視点、公式確認への促しを含む。5〜8文程度"
+    }
   ],
-  "closingText": "まとめ文",
+  "closingText": "まとめ文。2〜4文で次の行動につなげる",
   "metaTitle": "SEOタイトル",
   "metaDescription": "SEO説明文",
   "recommendedSubsidyText": "この記事で紹介する補助金の説明文",
@@ -138,6 +243,7 @@ ${recommendedSubsidies.length ? JSON.stringify(recommendedSubsidies, null, 2) : 
         model,
         temperature: 0.55,
         response_format: { type: "json_object" },
+        max_tokens: 7000,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },

@@ -94,6 +94,60 @@ function getExpertLabel(expert) {
   return [expert.name, expert.qualification].filter(Boolean).join(' / ');
 }
 
+function TextParagraphs({ value }) {
+  const paragraphs = String(value || '')
+    .split(/\n{2,}|\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!paragraphs.length) return null;
+
+  return paragraphs.map((paragraph, index) => (
+    <p key={`${paragraph.slice(0, 24)}-${index}`} style={{ margin: index === 0 ? 0 : '14px 0 0' }}>
+      {paragraph}
+    </p>
+  ));
+}
+
+function ArticleHeroImage({ url }) {
+  return (
+    <div
+      className="expert-article-hero-image"
+      style={{
+        width: '100%',
+        aspectRatio: '16 / 9',
+        maxHeight: '420px',
+        overflow: 'hidden',
+        borderRadius: '14px',
+        margin: '0 0 34px',
+        background: 'linear-gradient(135deg, #ecfdf5 0%, #f8fafc 58%, #eef2f7 100%)',
+        border: `1px solid ${colors.border}`,
+        display: 'grid',
+        placeItems: 'center',
+        color: colors.primary,
+        fontSize: '14px',
+        fontWeight: 900,
+        letterSpacing: '0.16em',
+      }}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      ) : (
+        <span>EXPERT Q&A</span>
+      )}
+    </div>
+  );
+}
+
 function getStatusLabel(item) {
   if (item?.crawl_status === 'archived') return '受付終了';
   return '公募中';
@@ -359,20 +413,7 @@ export default function ExpertArticle() {
             {article.published_at && <span>公開日: {formatDate(article.published_at)}</span>}
           </div>
 
-          {article.main_image_url && (
-            <img
-              src={article.main_image_url}
-              alt=""
-              style={{
-                width: '100%',
-                maxHeight: '420px',
-                objectFit: 'cover',
-                borderRadius: '10px',
-                marginBottom: '28px',
-                background: '#eef2f7',
-              }}
-            />
-          )}
+          <ArticleHeroImage url={article.main_image_url} />
 
           {(article.lead_text || article.summary) && (
             <p
@@ -389,34 +430,67 @@ export default function ExpertArticle() {
           )}
 
           {qaItems.length > 0 && (
-            <section style={{ display: 'grid', gap: '22px', marginBottom: '36px' }}>
+            <section style={{ display: 'grid', gap: '28px', marginBottom: '42px' }}>
               {qaItems.map((item, index) => (
-                <div key={`${item.question}-${index}`}>
-                  <h2
-                    style={{
-                      margin: '0 0 10px',
-                      fontSize: '21px',
-                      lineHeight: 1.55,
-                      color: colors.ink,
-                      overflowWrap: 'anywhere',
-                    }}
-                  >
-                    Q{index + 1}. {item.question}
-                  </h2>
+                <div
+                  key={`${item.question}-${index}`}
+                  className="expert-qa-card"
+                  style={{
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: '14px',
+                    padding: '24px',
+                    background: '#ffffff',
+                    boxShadow: '0 8px 22px rgba(15, 23, 42, 0.04)',
+                  }}
+                >
                   <div
                     style={{
-                      borderLeft: `4px solid ${colors.primary}`,
-                      padding: '14px 0 14px 18px',
-                      color: '#374151',
-                      fontSize: '16px',
-                      lineHeight: 1.9,
-                      background: '#f8fafc',
-                      borderRadius: '0 8px 8px 0',
-                      overflowWrap: 'anywhere',
-                      whiteSpace: 'pre-wrap',
+                      display: 'grid',
+                      gridTemplateColumns: '42px minmax(0, 1fr)',
+                      gap: '14px',
+                      alignItems: 'start',
+                      marginBottom: '18px',
                     }}
                   >
-                    {item.answer}
+                    <span
+                      style={{
+                        display: 'inline-grid',
+                        placeItems: 'center',
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        background: '#e7f6f2',
+                        color: colors.primaryDark,
+                        fontWeight: 900,
+                      }}
+                    >
+                      Q
+                    </span>
+                    <h2
+                      style={{
+                        margin: 0,
+                        fontSize: '22px',
+                        lineHeight: 1.55,
+                        color: colors.ink,
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {index + 1}. {item.question}
+                    </h2>
+                  </div>
+                  <div
+                    style={{
+                      borderLeft: `3px solid ${colors.primary}`,
+                      padding: '18px 20px',
+                      color: '#374151',
+                      fontSize: '16px',
+                      lineHeight: 2,
+                      background: '#f8fafc',
+                      borderRadius: '0 12px 12px 0',
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    <TextParagraphs value={item.answer} />
                   </div>
                 </div>
               ))}
@@ -448,7 +522,7 @@ export default function ExpertArticle() {
                 fontWeight: 700,
               }}
             >
-              {article.closing_text}
+              <TextParagraphs value={article.closing_text} />
             </section>
           )}
 
@@ -558,10 +632,20 @@ export default function ExpertArticle() {
 
             .expert-article-page article {
               padding: 24px 18px !important;
+              border-radius: 10px !important;
             }
 
             .expert-article-page h1 {
               font-size: 27px !important;
+            }
+
+            .expert-article-hero-image {
+              border-radius: 10px !important;
+              margin-bottom: 26px !important;
+            }
+
+            .expert-qa-card {
+              padding: 18px !important;
             }
 
             .expert-article-subsidies {

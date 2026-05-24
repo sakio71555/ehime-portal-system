@@ -26,6 +26,43 @@ function getExpertLabel(expert) {
   return [expert.name, expert.qualification].filter(Boolean).join(' / ');
 }
 
+function ArticleImage({ url }) {
+  return (
+    <div
+      className="expert-article-card-image"
+      style={{
+        width: '100%',
+        aspectRatio: '4 / 3',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        background: 'linear-gradient(135deg, #ecfdf5 0%, #f8fafc 65%, #eef2f7 100%)',
+        border: `1px solid ${colors.border}`,
+        display: 'grid',
+        placeItems: 'center',
+        color: colors.primary,
+        fontSize: '12px',
+        fontWeight: 900,
+        letterSpacing: '0.12em',
+      }}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      ) : (
+        <span>EXPERT Q&A</span>
+      )}
+    </div>
+  );
+}
+
 function ArticleCard({ article, expert, subsidyCount }) {
   return (
     <Link
@@ -33,7 +70,7 @@ function ArticleCard({ article, expert, subsidyCount }) {
       className="expert-article-card"
       style={{
         display: 'grid',
-        gridTemplateColumns: article.main_image_url ? '220px minmax(0, 1fr)' : '1fr',
+        gridTemplateColumns: '220px minmax(0, 1fr)',
         gap: '24px',
         color: 'inherit',
         textDecoration: 'none',
@@ -46,19 +83,7 @@ function ArticleCard({ article, expert, subsidyCount }) {
         minWidth: 0,
       }}
     >
-      {article.main_image_url && (
-        <img
-          src={article.main_image_url}
-          alt=""
-          style={{
-            width: '100%',
-            aspectRatio: '4 / 3',
-            objectFit: 'cover',
-            borderRadius: '8px',
-            background: '#eef2f7',
-          }}
-        />
-      )}
+      <ArticleImage url={article.main_image_url} />
 
       <div style={{ minWidth: 0 }}>
         <div
