@@ -39,6 +39,7 @@ const STATIC_ROUTES = [
   { path: '/search', changefreq: 'daily', priority: '0.9' },
   { path: '/simulator', changefreq: 'monthly', priority: '0.7' },
   { path: '/experts', changefreq: 'monthly', priority: '0.7' },
+  { path: '/expert-articles', changefreq: 'weekly', priority: '0.75' },
   { path: '/beginners', changefreq: 'monthly', priority: '0.7' },
   { path: '/columns', changefreq: 'weekly', priority: '0.8' },
   { path: '/area/matsuyama', changefreq: 'daily', priority: '0.85' },
@@ -193,6 +194,39 @@ async function fetchAllPublishedColumns(supabase) {
   return rows;
 }
 
+async function fetchAllPublishedExpertArticles(supabase) {
+  const pageSize = 1000;
+  let from = 0;
+  const rows = [];
+
+  while (true) {
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabase
+      .from('expert_articles')
+      .select('slug, published_at, updated_at')
+      .eq('status', 'published')
+      .eq('is_active', true)
+      .not('slug', 'is', null)
+      .neq('slug', '')
+      .order('slug', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.warn(`⚠️ expert_articles取得エラー: ${error.message}`);
+      return rows;
+    }
+
+    const chunk = data || [];
+    rows.push(...chunk);
+
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 async function main() {
   console.log('🚀 sitemap.xml 自動生成を開始します');
   console.log(`SITE_URL: ${SITE_URL}`);
@@ -247,11 +281,24 @@ async function main() {
       })
     );
 
+  const expertArticles = await fetchAllPublishedExpertArticles(supabase);
+
+  const expertArticleEntries = expertArticles
+    .filter((item) => item?.slug)
+    .map((item) =>
+      toUrlEntry({
+        loc: buildUrl(`/expert-articles/${encodeURIComponent(item.slug)}`),
+        lastmod: item.published_at || item.updated_at || today,
+        changefreq: 'monthly',
+        priority: '0.7',
+      })
+    );
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset
   xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
 >
-${[...staticEntries, ...subsidyEntries, ...columnEntries].join('\n')}
+${[...staticEntries, ...subsidyEntries, ...columnEntries, ...expertArticleEntries].join('\n')}
 </urlset>
 `;
 
@@ -263,11 +310,13 @@ ${[...staticEntries, ...subsidyEntries, ...columnEntries].join('\n')}
   console.log(`静的ページ: ${staticEntries.length} 件`);
   console.log(`補助金詳細: ${subsidyEntries.length} 件`);
   console.log(`コラム詳細: ${columnEntries.length} 件`);
+  console.log(`専門家記事詳細: ${expertArticleEntries.length} 件`);
   console.log(
     `合計: ${
       staticEntries.length +
       subsidyEntries.length +
-      columnEntries.length
+      columnEntries.length +
+      expertArticleEntries.length
     } 件`
   );
   console.log('==============================');

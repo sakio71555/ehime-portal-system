@@ -228,6 +228,7 @@ export default function AdminCrawler() {
             <a href="/admin?tab=experts" style={navLinkStyle}>🤝 専門家管理</a>
             <a href="/admin?tab=columns" style={navLinkStyle}>📝 コラム管理</a>
             <a href="/admin?tab=features" style={navLinkStyle}>⭐ 特集記事制作</a>
+            <a href="/admin?tab=expert-articles" style={navLinkStyle}>💬 専門家記事</a>
             <div style={{ ...navLinkStyle, color: 'white', fontWeight: 'bold', borderBottom: '3px solid #38bdf8', backgroundColor: '#1f2937' }}>
               🛠 クローラー管理
             </div>

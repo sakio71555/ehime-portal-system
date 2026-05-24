@@ -5,7 +5,10 @@ import AdminDashboard from './AdminDashboard';
 import AdminExperts from './AdminExperts';
 import AdminColumns from './AdminColumns';
 import AdminCrawler from './AdminCrawler';
+import AdminExpertArticles from './AdminExpertArticles';
 import ColumnArticle from './ColumnArticle'; 
+import ExpertArticle from './ExpertArticle';
+import ExpertArticles from './ExpertArticles';
 import SubsidyDetail from './SubsidyDetail';
 import Login from './Login';
 import { supabase } from './lib/supabaseClient';
@@ -19,6 +22,7 @@ function AdminRouter({ session }) {
   if (tab === 'features') return <AdminColumns initialMode="features" />;
   if (tab === 'columns') return <AdminColumns initialMode="columns" />;
   if (tab === 'crawler') return <AdminCrawler />;
+  if (tab === 'expert-articles') return <AdminExpertArticles />;
   return <AdminDashboard />;
 }
 
@@ -39,6 +43,8 @@ function App() {
       {/* 独立した詳細ページ */}
       <Route path="/subsidy/:id" element={<SubsidyDetail />} />
       <Route path="/column/:slug" element={<ColumnArticle />} />
+      <Route path="/expert-articles" element={<ExpertArticles />} />
+      <Route path="/expert-articles/:slug" element={<ExpertArticle />} />
 
       {/* ポータルサイト全体（/search, /simulator 等のルーティングは内部で処理） */}
       <Route path="*" element={<EhimeSubsidyPortal />} />
