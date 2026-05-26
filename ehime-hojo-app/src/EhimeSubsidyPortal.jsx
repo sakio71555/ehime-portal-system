@@ -31,11 +31,6 @@ function buildWebsiteJsonLd() {
     inLanguage: 'ja',
     description:
       '愛媛県内の事業者向け補助金・助成金情報を検索できるポータルサイトです。',
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: 'https://ehime-hojokin.jp/search?keyword={search_term_string}',
-      'query-input': 'required name=search_term_string',
-    },
   };
 }
 
@@ -870,6 +865,7 @@ export default function EhimeSubsidyPortal() {
                   title={searchTitle}
                   description={searchDescription}
                   canonical={searchCanonical}
+                  robots="noindex,follow"
                   jsonLd={buildCollectionJsonLd({
                     title: searchTitle,
                     description: searchDescription,

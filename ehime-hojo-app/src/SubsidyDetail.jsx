@@ -78,6 +78,64 @@ const hasDisplayValue = (value) => {
   return true;
 };
 
+const normalizeDisplayText = (value) => String(value || '').trim();
+
+const getFirstDisplayValue = (obj, keys = []) => {
+  for (const key of keys) {
+    const value = normalizeDisplayText(obj?.[key]);
+    if (value && !['不明', '未確認', 'null', 'undefined'].includes(value)) {
+      return value;
+    }
+  }
+
+  return '';
+};
+
+const formatDateForDetail = (value) => {
+  const text = normalizeDisplayText(value);
+  if (!text) return '';
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime()) && /^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return date.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  }
+
+  return text;
+};
+
+function TrustInfoBox({ items }) {
+  const visibleItems = items.filter((item) => item.value || item.showEmpty);
+
+  if (visibleItems.length === 0) return null;
+
+  return (
+    <section className="subsidy-detail-trust-box" aria-label="公式情報の確認ポイント">
+      <div className="subsidy-detail-trust-header">
+        <span className="subsidy-detail-trust-icon">✅</span>
+        <div>
+          <h2 className="subsidy-detail-trust-title">申請前に確認したい公式情報</h2>
+          <p className="subsidy-detail-trust-lead">
+            掲載情報は制度探しの入口として整理しています。申請条件や必要書類は、必ず公式ページで最新情報をご確認ください。
+          </p>
+        </div>
+      </div>
+
+      <dl className="subsidy-detail-trust-grid">
+        {visibleItems.map((item) => (
+          <div className="subsidy-detail-trust-item" key={item.label}>
+            <dt>{item.label}</dt>
+            <dd>{item.value || '未確認'}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 function InfoSection({ icon, title, children }) {
   if (!hasDisplayValue(children)) return null;
 
@@ -318,6 +376,56 @@ export default function SubsidyDetail() {
   const officialLink = isValidHttpUrl(display.officialUrl)
     ? display.officialUrl.trim()
     : '';
+  const applicationStart = getFirstDisplayValue(subsidy, [
+    'application_start_date',
+    'start_date',
+    'start_at',
+  ]);
+  const applicationEnd = getFirstDisplayValue(subsidy, [
+    'application_end_date',
+    'end_date',
+    'end_at',
+  ]);
+  const subsidyRate =
+    getFirstDisplayValue(subsidy, [
+      'subsidy_rate_text',
+      'subsidy_rate',
+      'grant_rate_text',
+      'rate_text',
+    ]) || display.amountSub.replace(/^補助率[:：]\s*/, '');
+  const checkedAt = getFirstDisplayValue(subsidy, [
+    'official_checked_at',
+    'last_checked_at',
+    'checked_at',
+    'fetched_at',
+    'updated_at',
+  ]);
+  const trustItems = [
+    { label: '公募ステータス', value: display.status },
+    { label: '申請期間', value: display.applicationPeriod },
+    { label: '受付開始日', value: formatDateForDetail(applicationStart) },
+    { label: '受付終了日', value: formatDateForDetail(applicationEnd) },
+    { label: '実施機関', value: display.organization },
+    { label: '対象地域', value: display.region },
+    { label: '対象者', value: display.targetEntities },
+    { label: '補助上限額', value: display.amountMain },
+    { label: '補助率', value: subsidyRate },
+    {
+      label: '公式URL',
+      value: officialLink ? (
+        <a href={officialLink} target="_blank" rel="noopener noreferrer">
+          公式ページを開く ↗
+        </a>
+      ) : (
+        ''
+      ),
+    },
+    {
+      label: '公式情報確認日',
+      value: formatDateForDetail(checkedAt),
+      showEmpty: true,
+    },
+  ];
 
   return (
     <div
@@ -474,6 +582,8 @@ export default function SubsidyDetail() {
                   </div>
                 ) : null}
               </div>
+
+              <TrustInfoBox items={trustItems} />
 
               <div className="subsidy-detail-section" style={{ marginBottom: '32px' }}>
                 <h3

@@ -9,6 +9,7 @@ export default function SEO({
   image = DEFAULT_SEO.image,
   type = 'website',
   noindex = false,
+  robots = null,
   jsonLd = null,
 }) {
   const pageTitle =
@@ -18,17 +19,14 @@ export default function SEO({
 
   const canonicalUrl = absoluteUrl(canonical);
   const imageUrl = absoluteUrl(image);
+  const robotsContent = robots || (noindex ? 'noindex,nofollow' : 'index,follow');
 
   return (
     <Helmet>
       <title>{pageTitle}</title>
       <meta name="description" content={description} />
 
-      {noindex ? (
-        <meta name="robots" content="noindex,nofollow" />
-      ) : (
-        <meta name="robots" content="index,follow" />
-      )}
+      <meta name="robots" content={robotsContent} />
 
       <link rel="canonical" href={canonicalUrl} />
 

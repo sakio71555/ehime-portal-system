@@ -36,7 +36,6 @@ const FEATURE_ROUTES = [
 
 const STATIC_ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
-  { path: '/search', changefreq: 'daily', priority: '0.9' },
   { path: '/simulator', changefreq: 'monthly', priority: '0.7' },
   { path: '/experts', changefreq: 'monthly', priority: '0.7' },
   { path: '/expert-articles', changefreq: 'weekly', priority: '0.75' },
@@ -81,6 +80,19 @@ function toIsoDate(value) {
 function buildUrl(pathname) {
   const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
   return `${SITE_URL}${normalizedPath}`;
+}
+
+function isIndexableSitemapPath(pathname) {
+  const value = String(pathname || '').trim();
+  if (!value) return false;
+
+  const [pathOnly] = value.split('?');
+
+  if (pathOnly === '/search') return false;
+  if (value.includes('search?keyword=')) return false;
+  if (value.includes('{search_term_string}')) return false;
+
+  return true;
 }
 
 function toUrlEntry({ loc, lastmod, changefreq = 'weekly', priority = '0.6' }) {
@@ -246,7 +258,9 @@ async function main() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const staticEntries = STATIC_ROUTES.map((route) =>
+  const staticEntries = STATIC_ROUTES.filter((route) =>
+    isIndexableSitemapPath(route.path)
+  ).map((route) =>
     toUrlEntry({
       loc: buildUrl(route.path),
       lastmod: today,

@@ -48,38 +48,87 @@ export function getSubsidyRegion(subsidy) {
   );
 }
 
+function firstSeoValue(subsidy, keys = []) {
+  for (const key of keys) {
+    const value = stripForSeo(subsidy?.[key]);
+
+    if (
+      value &&
+      !['不明', '未確認', '未設定', 'null', 'undefined'].includes(value)
+    ) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function joinSeoParts(parts = [], separator = '・') {
+  return parts.filter(Boolean).join(separator);
+}
+
 export function buildSubsidySeoTitle(subsidy) {
   const title = stripForSeo(subsidy?.title || '補助金・助成金情報');
-  const region = getSubsidyRegion(subsidy);
+  const amount = firstSeoValue(subsidy, ['amount_text', 'amount']);
+  const period = firstSeoValue(subsidy, [
+    'application_period_text',
+    'application_period',
+    'deadline',
+  ]);
+  const target = firstSeoValue(subsidy, [
+    'target_entities',
+    'eligible_applicants',
+    'target_businesses',
+  ]);
 
-  return `【${region}】${title}｜申請期間・上限金額・補助率`;
+  const detailLabels = joinSeoParts([
+    period ? '申請期間' : '',
+    amount ? '補助上限' : '',
+    target ? '対象者' : '',
+  ]);
+
+  const suffix = detailLabels || '制度概要';
+
+  return truncateText(`${title}｜${suffix}｜愛媛の補助金`, 68);
 }
 
 export function buildSubsidySeoDescription(subsidy) {
   const title = stripForSeo(subsidy?.title || '補助金・助成金');
   const region = getSubsidyRegion(subsidy);
 
-  const period =
-    subsidy?.application_period_text ||
-    subsidy?.deadline ||
-    '申請期間未確認';
+  const period = firstSeoValue(subsidy, [
+    'application_period_text',
+    'application_period',
+    'deadline',
+  ]);
 
-  const amount =
-    subsidy?.amount_text ||
-    subsidy?.amount ||
-    '上限金額未確認';
+  const amount = firstSeoValue(subsidy, ['amount_text', 'amount']);
 
-  const rate =
-    subsidy?.subsidy_rate_text ||
-    subsidy?.subsidy_rate ||
-    '補助率未確認';
+  const status = firstSeoValue(subsidy, [
+    'application_status',
+    'status_text',
+    'recruitment_status',
+  ]);
 
-  const organization =
-    subsidy?.organization ||
-    '実施機関未確認';
+  const target = firstSeoValue(subsidy, [
+    'target_entities',
+    'eligible_applicants',
+    'target_businesses',
+  ]);
+
+  const details = joinSeoParts([
+    target ? '対象者' : '',
+    amount ? `補助上限額：${amount}` : '',
+    period ? `申請期間：${period}` : '',
+    status ? `公募状況：${status}` : '',
+  ]);
+
+  const tail = details
+    ? `${details}、公式情報を整理。`
+    : '対象者、補助上限額、申請期間、公募状況、公式情報を整理。';
 
   return truncateText(
-    `${region}の「${title}」は、${organization}が実施する補助金・助成金情報です。申請期間：${period}。${amount}。補助率：${rate}。対象者・対象経費・公式公募ページを確認できます。申請前に必ず公式情報をご確認ください。`,
+    `${title}の${tail}${region}の事業者・個人向けに要点を確認できます。申請前に必ず公式情報をご確認ください。`,
     155
   );
 }
