@@ -34,26 +34,172 @@ const stripHtml = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const buildImagePrompt = (theme: string) => `
-A clean modern flat vector illustration for a Japanese subsidy and public support media site.
-Theme: ${theme}.
-No text, no letters, no numbers, no logo.
-Soft corporate colors, simple composition, business support, local community, public service.
-`;
+const toText = (value: unknown) =>
+  typeof value === "string" ? value.trim() : "";
+
+const imageQualityOrDefault = (value: string) => {
+  const quality = value.trim();
+  return ["low", "medium", "high", "auto"].includes(quality) ? quality : "medium";
+};
+
+const imageSizeOrDefault = (value: string) => {
+  const size = value.trim();
+  return ["1024x1024", "1536x1024", "1024x1536", "auto"].includes(size) ? size : "1536x1024";
+};
+
+const buildImagePrompt = ({
+  theme,
+  title,
+  category,
+  articleType,
+  contentContext,
+}: {
+  theme: string;
+  title: string;
+  category: string;
+  articleType: string;
+  contentContext: string;
+}) => `
+Create a high-quality editorial hero image for a Japanese subsidy and grant information article.
+
+Article:
+- Title: ${title || theme}
+- Category: ${category || "補助金情報"}
+- Type: ${articleType || "column"}
+- Theme: ${theme}
+- Context: ${contentContext}
+
+Visual direction:
+- Premium Japanese web media thumbnail, calm and trustworthy
+- Soft editorial illustration with a refined public-service feeling
+- Local Ehime atmosphere, small business support, consultation, documents, planning, community, or public assistance
+- Warm but restrained colors: ivory, deep teal, soft orange, muted blue, gentle green
+- Clean 16:9 composition with clear focal point and generous whitespace
+- Modern, polished, not childish, not clip-art, not a flyer, not a poster
+- Suitable for a government-adjacent subsidy information portal
+
+Strict constraints:
+- No text
+- No Japanese characters
+- No letters, numbers, logos, watermarks, signs, screenshots, UI panels, or fake documents with readable text
+- Do not create distorted currency symbols or giant yen marks
+- Avoid extra fingers, distorted hands, uncanny faces, or celebrity-like people
+- Avoid crowded collage layouts and over-saturated colors
+`.trim();
+
+const outputImageItem = (imageJson: Record<string, unknown>) => {
+  const output = Array.isArray(imageJson?.output) ? imageJson.output : [];
+  for (const outputItem of output) {
+    if (!outputItem || typeof outputItem !== "object") continue;
+    const content = Array.isArray((outputItem as Record<string, unknown>).content)
+      ? ((outputItem as Record<string, unknown>).content as unknown[])
+      : [];
+    const imageItem = content.find(
+      (item) => item && typeof item === "object" && (item as Record<string, unknown>).type === "output_image"
+    );
+    if (imageItem && typeof imageItem === "object") {
+      return imageItem as Record<string, unknown>;
+    }
+  }
+  return null;
+};
+
+const nestedImageValue = (item: Record<string, unknown> | null, key: string) => {
+  if (!item) return "";
+  const image = item.image;
+  if (image && typeof image === "object") {
+    return toText((image as Record<string, unknown>)[key]);
+  }
+  return "";
+};
+
+const extractImageBase64 = (imageJson: Record<string, unknown>) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const outputImage = outputImageItem(imageJson);
+
+  return (
+    toText(firstData?.b64_json) ||
+    nestedImageValue(firstData, "b64_json") ||
+    toText(outputImage?.b64_json) ||
+    nestedImageValue(outputImage, "b64_json")
+  );
+};
+
+const extractImageUrl = (imageJson: Record<string, unknown>) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const outputImage = outputImageItem(imageJson);
+
+  return (
+    toText(firstData?.url) ||
+    nestedImageValue(firstData, "url") ||
+    toText(outputImage?.url) ||
+    nestedImageValue(outputImage, "url")
+  );
+};
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+};
+
+const buildImageDebug = (imageJson: Record<string, unknown>, response: Response) => {
+  const firstData = Array.isArray(imageJson?.data) && imageJson.data[0]
+    ? imageJson.data[0] as Record<string, unknown>
+    : null;
+  const error = imageJson?.error && typeof imageJson.error === "object"
+    ? toText((imageJson.error as Record<string, unknown>).message)
+    : null;
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    hasDataArray: Array.isArray(imageJson?.data),
+    dataLength: Array.isArray(imageJson?.data) ? imageJson.data.length : 0,
+    firstKeys: firstData ? Object.keys(firstData) : [],
+    hasB64: Boolean(toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")),
+    b64Length: (toText(firstData?.b64_json) || nestedImageValue(firstData, "b64_json")).length,
+    hasUrl: Boolean(toText(firstData?.url) || nestedImageValue(firstData, "url")),
+    error,
+  };
+};
 
 const generateImage = async ({
   openAiKey,
   imageModel,
   imageQuality,
+  imageSize,
   imageTheme,
+  imageTitle,
+  imageCategory,
+  articleType,
+  contentContext,
 }: {
   openAiKey: string;
   imageModel: string;
   imageQuality: string;
+  imageSize: string;
   imageTheme: string;
+  imageTitle: string;
+  imageCategory: string;
+  articleType: string;
+  contentContext: string;
 }) => {
   let base64Image = "";
   let imageError = "";
+  let imageUrl = "";
+  let imageDebug: Record<string, unknown> | null = null;
 
   try {
     const imageRes = await fetch("https://api.openai.com/v1/images/generations", {
@@ -64,19 +210,46 @@ const generateImage = async ({
       },
       body: JSON.stringify({
         model: imageModel,
-        prompt: buildImagePrompt(imageTheme),
+        prompt: buildImagePrompt({
+          theme: imageTheme,
+          title: imageTitle,
+          category: imageCategory,
+          articleType,
+          contentContext,
+        }),
         n: 1,
-        size: "1024x1024",
+        size: imageSize,
         quality: imageQuality,
+        output_format: "png",
       }),
     });
 
     const imageJson = await imageRes.json();
+    imageDebug = buildImageDebug(imageJson, imageRes);
+    console.log("column image generation response summary", {
+      ...imageDebug,
+      imageModel,
+      imageQuality,
+      imageSize,
+    });
 
     if (imageRes.ok) {
-      base64Image = imageJson?.data?.[0]?.b64_json || "";
+      base64Image = extractImageBase64(imageJson);
+      imageUrl = extractImageUrl(imageJson);
+      if (!base64Image && imageUrl) {
+        try {
+          const imageResponse = await fetch(imageUrl);
+          if (imageResponse.ok) {
+            base64Image = arrayBufferToBase64(await imageResponse.arrayBuffer());
+          } else {
+            imageError = `画像URLの取得に失敗しました。status: ${imageResponse.status}`;
+          }
+        } catch (err) {
+          imageError = err instanceof Error ? err.message : "画像URLの取得に失敗しました。";
+        }
+      }
       if (!base64Image) {
-        imageError = "画像生成APIは成功しましたが、画像データが返りませんでした。";
+        imageError = imageError || "画像生成APIは成功しましたが、画像データが返りませんでした。";
       }
     } else {
       imageError =
@@ -93,7 +266,7 @@ const generateImage = async ({
     console.warn("画像生成処理でエラー:", message);
   }
 
-  return { base64Image, imageError };
+  return { base64Image, imageError, imageUrl, imageDebug };
 };
 
 serve(async (req: Request) => {
@@ -151,8 +324,9 @@ serve(async (req: Request) => {
     }
 
     const isAutoMode = Boolean(subsidiesText);
-    const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
-    const imageQuality = Deno.env.get("OPENAI_IMAGE_QUALITY")?.trim() || "low";
+    const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1";
+    const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "medium");
+    const imageSize = imageSizeOrDefault(Deno.env.get("OPENAI_IMAGE_SIZE") || "1536x1024");
 
     if (imageOnly) {
       const fallbackTheme = stripHtml(contentText).slice(0, 180);
@@ -161,17 +335,26 @@ serve(async (req: Request) => {
         title ||
         fallbackTheme ||
         "Ehime subsidy support and local business assistance";
-      const { base64Image, imageError } = await generateImage({
+      const { base64Image, imageError, imageUrl, imageDebug } = await generateImage({
         openAiKey,
         imageModel,
         imageQuality,
+        imageSize,
         imageTheme,
+        imageTitle: title,
+        imageCategory: preferredCategory,
+        articleType,
+        contentContext: fallbackTheme,
       });
 
       return jsonResponse({
         base64Image,
         imageError,
+        imageUrl,
+        imageDebug,
         imageModel,
+        imageQuality,
+        imageSize,
       });
     }
 
@@ -361,18 +544,27 @@ ${extraInstructionBlock}
     }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
 
-    const { base64Image, imageError } = await generateImage({
+    const { base64Image, imageError, imageUrl, imageDebug } = await generateImage({
       openAiKey,
       imageModel,
       imageQuality,
+      imageSize,
       imageTheme: articleData.thumbnail_text,
+      imageTitle: articleData.title,
+      imageCategory: articleData.category,
+      articleType,
+      contentContext: stripHtml(articleData.content).slice(0, 280),
     });
 
     return jsonResponse({
       articleData,
       base64Image,
       imageError,
+      imageUrl,
+      imageDebug,
       imageModel,
+      imageQuality,
+      imageSize,
     });
   } catch (error) {
     return jsonResponse(

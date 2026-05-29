@@ -1056,7 +1056,11 @@ export default function AdminExpertArticles() {
                       disabled={generatingImage}
                       style={{ ...primaryButtonStyle, padding: '0 14px', minHeight: '40px' }}
                     >
-                      {generatingImage ? '画像生成中...' : 'AIで画像生成'}
+                      {generatingImage
+                        ? '画像生成中...'
+                        : form.main_image_url
+                          ? 'AIで画像を再生成'
+                          : 'AIで画像生成'}
                     </button>
                     <label
                       htmlFor="expert-article-image-upload"

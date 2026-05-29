@@ -92,24 +92,34 @@ Context:
 
 Visual direction:
 - ${styleConfig.prompt}
-- Trustworthy, calm, modern public-service editorial style
+- Premium Japanese editorial thumbnail, trustworthy, calm, and modern public-service style
+- 16:9 composition with one clear focal point, generous whitespace, and polished lighting
 - People reviewing documents or discussing support programs in a bright office or local Ehime-inspired setting when appropriate for the selected style
 - Subtle hints of Ehime such as citrus, Seto Inland Sea colors, or local business atmosphere
-- Clean composition suitable for a web article thumbnail
+- Clean composition suitable for a web article thumbnail, not a poster, flyer, banner, or advertisement
 - No text
 - No Japanese characters
+- No letters or numbers
 - No logos
 - No watermarks
 - No readable signs
 - No UI screenshots
+- No fake documents with readable text
+- Do not include giant yen symbols, distorted currency marks, or crowded collage layouts
 - Do not include real public figures
 - Avoid distorted hands and exaggerated expressions
+- Avoid uncanny faces, over-saturated colors, and low-quality clip-art
 `.trim();
 };
 
 const imageQualityOrDefault = (value: string) => {
   const quality = value.trim();
-  return ["low", "medium", "high", "auto"].includes(quality) ? quality : "low";
+  return ["low", "medium", "high", "auto"].includes(quality) ? quality : "medium";
+};
+
+const imageSizeOrDefault = (value: string) => {
+  const size = value.trim();
+  return ["1024x1024", "1536x1024", "1024x1536", "auto"].includes(size) ? size : "1536x1024";
 };
 
 const outputImageItem = (imageJson: Record<string, unknown>) => {
@@ -291,8 +301,9 @@ const generateImage = async ({
   prompt: string;
   imageStyle: string;
 }) => {
-  const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1-mini";
-  const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "low");
+  const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1";
+  const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "medium");
+  const imageSize = imageSizeOrDefault(Deno.env.get("OPENAI_IMAGE_SIZE") || "1536x1024");
   const normalizedImageStyle = imageStyleOrDefault(imageStyle);
   const imageStyleLabel = IMAGE_STYLE_CONFIG[normalizedImageStyle].label;
 
@@ -305,7 +316,7 @@ const generateImage = async ({
     body: JSON.stringify({
       model: imageModel,
       prompt,
-      size: "1024x1024",
+      size: imageSize,
       quality: imageQuality,
       output_format: "png",
       n: 1,
@@ -317,6 +328,8 @@ const generateImage = async ({
     ...buildImageDebug(result, response),
     imageStyle: normalizedImageStyle,
     imageStyleLabel,
+    imageQuality,
+    imageSize,
   };
 
   console.log("image generation response summary", imageDebug);
@@ -329,6 +342,8 @@ const generateImage = async ({
         "OpenAIでのアイキャッチ画像生成に失敗しました。",
       imageDebug,
       imageModel,
+      imageQuality,
+      imageSize,
       imageStyle: normalizedImageStyle,
       imageStyleLabel,
     };
@@ -344,6 +359,8 @@ const generateImage = async ({
       imageError: "",
       imageDebug,
       imageModel,
+      imageQuality,
+      imageSize,
       imageStyle: normalizedImageStyle,
       imageStyleLabel,
     };
@@ -359,6 +376,8 @@ const generateImage = async ({
           imageError: `画像URLの取得に失敗しました。status: ${imageResponse.status}`,
           imageDebug,
           imageModel,
+          imageQuality,
+          imageSize,
           imageStyle: normalizedImageStyle,
           imageStyleLabel,
         };
@@ -374,6 +393,8 @@ const generateImage = async ({
           fetchedUrlBytes: imageBuffer.byteLength,
         },
         imageModel,
+        imageQuality,
+        imageSize,
         imageStyle: normalizedImageStyle,
         imageStyleLabel,
       };
@@ -384,6 +405,8 @@ const generateImage = async ({
         imageError: err instanceof Error ? err.message : "画像URLの取得に失敗しました。",
         imageDebug,
         imageModel,
+        imageQuality,
+        imageSize,
         imageStyle: normalizedImageStyle,
         imageStyleLabel,
       };
@@ -396,6 +419,8 @@ const generateImage = async ({
     imageError: "画像生成APIは成功しましたが、b64_json がありませんでした。",
     imageDebug,
     imageModel,
+    imageQuality,
+    imageSize,
     imageStyle: normalizedImageStyle,
     imageStyleLabel,
   };
