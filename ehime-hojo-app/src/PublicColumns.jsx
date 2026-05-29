@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
+import { STATIC_SEO_COLUMNS } from './staticSeoColumns';
 
 const colors = {
   primary: '#526b5d',
@@ -32,6 +33,24 @@ const formatDate = (value) => {
   return `${dateObj.getFullYear()}.${String(dateObj.getMonth() + 1).padStart(2, '0')}.${String(dateObj.getDate()).padStart(2, '0')}`;
 };
 
+const getColumnTimestamp = (column) => {
+  const dateObj = new Date(column?.published_at || column?.created_at || 0);
+  return Number.isNaN(dateObj.getTime()) ? 0 : dateObj.getTime();
+};
+
+const mergeAndSortColumns = (columns = []) => {
+  const bySlug = new Map();
+
+  [...columns, ...STATIC_SEO_COLUMNS].forEach((column) => {
+    if (!column?.slug) return;
+    if (!bySlug.has(column.slug)) bySlug.set(column.slug, column);
+  });
+
+  return [...bySlug.values()].sort(
+    (a, b) => getColumnTimestamp(b) - getColumnTimestamp(a)
+  );
+};
+
 export default function PublicColumns() {
   const [columns, setColumns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +61,7 @@ export default function PublicColumns() {
     const fetchColumns = async () => {
       if (!supabase) {
         if (!cancelled) {
-          setColumns([]);
+          setColumns(STATIC_SEO_COLUMNS);
           setLoading(false);
         }
         return;
@@ -63,14 +82,14 @@ export default function PublicColumns() {
         }
 
         if (!cancelled) {
-          setColumns(data || []);
+          setColumns(mergeAndSortColumns(data || []));
           setLoading(false);
         }
       } catch (err) {
         console.error('公開コラム取得エラー:', err);
 
         if (!cancelled) {
-          setColumns([]);
+          setColumns(STATIC_SEO_COLUMNS);
           setLoading(false);
         }
       }

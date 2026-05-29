@@ -67,23 +67,51 @@ const AREA_LANDING_PAGES = [
   {
     slug: 'matsuyama',
     region: '松山市',
-    title: '松山市の補助金・助成金一覧',
+    title: '松山市の補助金・助成金・給付金一覧',
     description:
-      '松山市で利用できる事業者向け補助金・助成金・支援金をまとめています。創業、設備投資、販路開拓、IT導入などに使える制度を確認できます。',
+      '松山市で利用できる補助金・助成金・給付金・支援金をまとめています。創業、設備投資、販路開拓、IT導入、個人向け支援などの制度を確認できます。',
   },
   {
     slug: 'imabari',
     region: '今治市',
-    title: '今治市の補助金・助成金一覧',
+    title: '今治市の補助金・助成金・給付金一覧',
     description:
-      '今治市で利用できる事業者向け補助金・助成金・支援金を掲載しています。申請期間、対象者、上限額、公式公募ページを確認できます。',
+      '今治市で利用できる補助金・助成金・給付金・支援金を掲載しています。申請期間、対象者、上限額、公式公募ページを確認できます。',
   },
   {
     slug: 'niihama',
     region: '新居浜市',
-    title: '新居浜市の補助金・助成金一覧',
+    title: '新居浜市の補助金・助成金・給付金一覧',
     description:
-      '新居浜市の中小企業・個人事業主向け補助金、助成金、支援制度を探せます。設備投資、創業、雇用、デジタル化などの制度確認に役立ちます。',
+      '新居浜市の中小企業・個人事業主・個人向け補助金、助成金、給付金、支援制度を探せます。設備投資、創業、雇用、デジタル化などの制度確認に役立ちます。',
+  },
+  {
+    slug: 'uwajima',
+    region: '宇和島市',
+    title: '宇和島市の補助金・助成金・給付金一覧',
+    description:
+      '宇和島市で利用できる補助金・助成金・給付金・支援制度を整理しています。事業者向け支援、農業・水産業、移住・定住、個人向け助成を確認できます。',
+  },
+  {
+    slug: 'seiyo',
+    region: '西予市',
+    title: '西予市の補助金・助成金・給付金一覧',
+    description:
+      '西予市で利用できる補助金・助成金・給付金・支援制度を掲載しています。創業、設備投資、農業、移住・定住、子育て支援などの制度確認に役立ちます。',
+  },
+  {
+    slug: 'yawatahama',
+    region: '八幡浜市',
+    title: '八幡浜市の補助金・助成金・給付金一覧',
+    description:
+      '八幡浜市で利用できる補助金・助成金・給付金・支援制度をまとめています。事業者支援、設備投資、販路開拓、移住・定住、個人向け助成を確認できます。',
+  },
+  {
+    slug: 'saijo',
+    region: '西条市',
+    title: '西条市の補助金・助成金・給付金一覧',
+    description:
+      '西条市で利用できる補助金・助成金・給付金・支援制度を探せます。創業、設備投資、省エネ、農業、子育て、住宅関連支援の確認に役立ちます。',
   },
 ];
 
@@ -108,6 +136,27 @@ const PURPOSE_LANDING_PAGES = [
     description:
       '愛媛県内のIT導入、DX、業務効率化、デジタル化に活用できる事業者向け補助金・助成金をまとめています。',
     keywords: ['IT', 'デジタル', 'DX', 'システム', '業務効率化'],
+  },
+  {
+    slug: 'benefits',
+    title: '愛媛県の給付金・補助金・助成金',
+    description:
+      '愛媛県内で利用できる給付金、補助金、助成金、支援金を探せます。事業者向け・個人向けの支援制度を、対象地域や申請期間とあわせて確認できます。',
+    keywords: ['給付金', '支援金', '補助金', '助成金', '支援制度'],
+  },
+  {
+    slug: 'childcare',
+    title: '愛媛県の子育て・医療費助成制度',
+    description:
+      '愛媛県内の子育て世帯、妊娠・出産、医療費助成、不妊治療、通院支援などに関する助成金・支援制度をまとめています。',
+    keywords: ['子育て', '医療費助成', '不妊治療', '母子保健', 'こども医療', '助成'],
+  },
+  {
+    slug: 'housing',
+    title: '愛媛県の住宅・空き家・移住定住補助金',
+    description:
+      '愛媛県内の住宅改修、空き家活用、耐震、省エネ改修、移住・定住に関する補助金・助成金を探せます。',
+    keywords: ['住宅', '空き家', '移住', '定住', '耐震', 'リフォーム', '住宅改修'],
   },
 ];
 
@@ -198,6 +247,8 @@ function getSearchableText(item) {
     item?.municipality,
     item?.target_entities,
     item?.target_expenses,
+    Array.isArray(item?.purposes) ? item.purposes.join(' ') : item?.purposes,
+    Array.isArray(item?.tags) ? item.tags.join(' ') : item?.tags,
     Array.isArray(item?.target_entities_arr) ? item.target_entities_arr.join(' ') : '',
     Array.isArray(item?.target_expenses_arr) ? item.target_expenses_arr.join(' ') : '',
     Array.isArray(item?.industries) ? item.industries.join(' ') : item?.industries,

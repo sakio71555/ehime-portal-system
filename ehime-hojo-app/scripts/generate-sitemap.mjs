@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
+import { STATIC_SEO_COLUMNS } from '../src/staticSeoColumns.js';
 
 const SITE_URL = normalizeSiteUrl(
   process.env.VITE_SITE_URL ||
@@ -44,10 +45,22 @@ const STATIC_ROUTES = [
   { path: '/area/matsuyama', changefreq: 'daily', priority: '0.85' },
   { path: '/area/imabari', changefreq: 'daily', priority: '0.85' },
   { path: '/area/niihama', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/uwajima', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/seiyo', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/yawatahama', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/saijo', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/startup', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/energy-saving', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/digital', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/benefits', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/childcare', changefreq: 'daily', priority: '0.85' },
+  { path: '/purpose/housing', changefreq: 'daily', priority: '0.85' },
   { path: '/features', changefreq: 'weekly', priority: '0.85' },
+  ...STATIC_SEO_COLUMNS.map((column) => ({
+    path: `/column/${column.slug}`,
+    changefreq: 'monthly',
+    priority: '0.75',
+  })),
   ...FEATURE_ROUTES.map((path) => ({
     path,
     changefreq: 'daily',

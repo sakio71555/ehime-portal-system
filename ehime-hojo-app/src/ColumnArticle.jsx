@@ -4,6 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import Header from './Header';
 import Footer from './Footer';
 import { supabase } from './lib/supabaseClient';
+import { getStaticSeoColumnBySlug } from './staticSeoColumns';
 
 const ALLOWED_TAGS = new Set([
   'H2',
@@ -109,6 +110,16 @@ export default function ColumnArticle() {
     let cancelled = false;
 
     const fetchColumn = async () => {
+      const staticColumn = getStaticSeoColumnBySlug(slug);
+
+      if (staticColumn) {
+        if (!cancelled) {
+          setColumn(staticColumn);
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!supabase || !slug) {
         if (!cancelled) {
           setColumn(null);
