@@ -123,3 +123,52 @@ DBに依存しない基礎コラムとして、以下を追加した。
 2. 表示回数上位かつCTR低めのクエリを抽出する。
 3. 固定LPで受け止めるもの、コラムで受け止めるもの、補助金詳細のtitle/meta改善で対応するものに分類する。
 4. インデックス未登録ページを「問題なし」「noindex対象」「改善対象」に分類する。
+
+---
+
+## 2026-05-29 Search Consoleクエリ対応 第2.1フェーズ
+
+### 対象にしたクエリ
+
+Search Consoleの検索パフォーマンスで、以下のような表示回数・クリックが確認できた。
+
+- `今治市 給付金 最新 令和8年`
+- `今治市 給付金 2026`
+- `久万高原町 暮らし応援商品券`
+- `久万高原町 商品券`
+- `非課税世帯 給付金`
+- `子育て支援金`
+
+### 実施した変更
+
+- `/area/imabari` のtitle / descriptionを、2026年・令和8年・給付金系クエリを受け止めやすい内容に強化した。
+- `/area/kumakogen` を追加し、久万高原町の商品券・給付金・補助金系クエリの固定LPとして使えるようにした。
+- `/purpose/benefits` を、非課税世帯・商品券・物価高騰対策・給付金系の検索意図に寄せて強化した。
+- `/purpose/childcare` を、子育て支援金・子ども医療・ひとり親・不妊治療などの個人向け助成の検索意図に寄せて強化した。
+- 静的SEOコラムとして以下を追加した。
+  - `/column/imabari-kyufukin-hojokin-guide`
+  - `/column/hikazei-setai-kyufukin-check`
+  - `/column/ehime-childcare-support-guide`
+
+### SEO上の判断
+
+`/search?keyword=...` は引き続き `noindex,follow` とし、Googleに固定URLとして見せない。検索クエリを受け止めるURLは、地域別LP、目的別LP、静的コラムへ寄せる。
+
+今回の追加URLは、検索結果ページではなく、説明文と関連補助金一覧または基礎解説を持つ固定ページとしてsitemap対象にする。
+
+### Search Consoleで次に確認すること
+
+ブラウザ操作は行わず、Search Console上では手動で以下を確認する。
+
+1. 「検索パフォーマンス」で対象クエリをクリックする。
+2. 「ページ」タブで、表示されているURLを確認する。
+3. `/search?keyword=...` が残っている場合は、noindex反映待ちとして扱う。
+4. `/area/imabari`、`/area/kumakogen`、`/purpose/benefits`、`/purpose/childcare`、追加コラムが表示対象に入ってくるかを継続観察する。
+5. CTRが低い固定LPは、title / description / 冒頭説明を追加で調整する。
+
+### 未対応事項
+
+- Search ConsoleのクエリCSVを使った一覧表化。
+- 久万高原町以外の町村LP追加。
+- 給付金・子育て系コラムのさらなる拡張。
+- 固定LP本文のさらなる長文化と内部リンク強化。
