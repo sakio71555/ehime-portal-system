@@ -241,12 +241,13 @@ export default function ColumnArticle() {
         }}
       >
         <Helmet>
-          <title>コラムが見つかりません | 愛媛の補助金ポータル</title>
+          <title>コラムが見つかりません | えひめ補助金ポータル</title>
           <meta
             name="description"
             content="指定されたコラム記事は見つかりませんでした。公開終了、または非公開になっている可能性があります。"
           />
           <meta name="robots" content="noindex,nofollow" />
+          <link rel="canonical" href={`https://ehime-hojokin.jp/column/${slug || ''}`} />
         </Helmet>
 
         <Header activePage="columns" setActivePage={handleNavigation} />
@@ -355,6 +356,8 @@ export default function ColumnArticle() {
             '愛媛県内の事業者向けに、補助金・助成金に関するお役立ち情報をお届けします。'
           }
         />
+        <meta name="robots" content="index,follow" />
+        <link rel="canonical" href={`https://ehime-hojokin.jp/column/${column.slug || slug || ''}`} />
         {column.thumbnail_url && (
           <meta property="og:image" content={column.thumbnail_url} />
         )}

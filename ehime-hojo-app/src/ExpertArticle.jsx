@@ -329,6 +329,11 @@ export default function ExpertArticle() {
   if (!article) {
     return (
       <div style={{ minHeight: '100vh', background: colors.soft }}>
+        <Helmet>
+          <title>記事が見つかりません | えひめ補助金ポータル</title>
+          <meta name="robots" content="noindex,nofollow" />
+          <link rel="canonical" href={`https://ehime-hojokin.jp/expert-articles/${slug || ''}`} />
+        </Helmet>
         <Header />
         <main style={{ maxWidth: '860px', margin: '0 auto', padding: '72px 24px' }}>
           <h1 style={{ margin: '0 0 16px', fontSize: '28px' }}>記事が見つかりません</h1>

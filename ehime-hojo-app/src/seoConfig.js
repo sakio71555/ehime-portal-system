@@ -8,7 +8,7 @@ export const DEFAULT_SEO = {
   title: '愛媛の補助金・助成金ポータル｜愛媛県内の事業者向け支援制度を検索',
   description:
     '愛媛県内の事業者向け補助金・助成金情報を検索できるポータルサイトです。松山市、今治市、西予市、宇和島市などの支援制度を、地域・目的・業種から探せます。',
-  image: `${SITE_URL}/ogp.jpg`,
+  image: `${SITE_URL}/banner1.jpg`,
 };
 
 export function absoluteUrl(path = '/') {

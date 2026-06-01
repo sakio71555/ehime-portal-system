@@ -175,6 +175,28 @@ Search Consoleの検索パフォーマンスで、以下のような表示回数
 
 ---
 
+## 2026-06-01 SEO最小修正
+
+### 実施内容
+
+- `ColumnArticle.jsx` の公開済みコラム詳細に自己参照canonicalと `index,follow` を追加。
+- `ColumnArticle.jsx` のnot found時に指定title、`noindex,nofollow`、自己参照canonicalを追加。
+- `ExpertArticle.jsx` は公開済み記事の既存canonicalを維持し、not found時だけ指定title、`noindex,nofollow`、自己参照canonicalを追加。
+- `seoConfig.js` の既定OGP画像は、存在しない `/ogp.jpg` ではなく既存の `public/banner1.jpg` を参照するよう変更。
+
+### 確認
+
+- `npm run build`: 成功。
+- `rg "canonical" src`: 対象canonicalを確認。
+- `rg "noindex" src`: not found用 `noindex,nofollow` を確認。
+- `rg "ogp.jpg|SITE_URL" src public`: `ogp.jpg` 参照なし、`${SITE_URL}/banner1.jpg` を確認。
+
+### 対象外
+
+- NotFoundルーティング、sitemap防御強化、Cloudflare 301案、SSG/SSR案は次フェーズ。
+
+---
+
 ## 2026-06-01 Search Console URL分類ヘルパー
 
 Search Consoleの「ページがインデックスに登録されない新しい要因」は、件数だけでは優先順位を誤りやすい。実URLをCSVでエクスポートし、URLパターン単位で分類してから、NotFound/404、301正規化、prerender/SSG、canonical調整のどれを先に行うか判断する。
