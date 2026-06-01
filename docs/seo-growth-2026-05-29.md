@@ -511,3 +511,60 @@ Redirect Rules適用とcurl確認後、以下の順に「修正を検証」を�
 5. クロール済み - インデックス未登録
 
 `noindex タグによって除外されました` は末尾スラッシュとは別に、Search Console URL検査で現在の判定を再確認してから扱う。
+
+---
+
+## 2026-06-01 `/subsidy/:id/` Redirect Rules適用完了確認
+
+Cloudflare Redirect RuleをWildcard pattern方式で適用し、主因だった `/subsidy/:id/` の末尾スラッシュ重複に対して301リダイレクトが効く状態になった。コード変更、npm build、本番デプロイは行っていない。
+
+### 確認コマンド
+
+```bash
+curl -I https://ehime-hojokin.jp/subsidy/1298/
+curl -I https://ehime-hojokin.jp/subsidy/1298
+curl -I https://ehime-hojokin.jp/subsidy/997/
+curl -I https://ehime-hojokin.jp/subsidy/997
+curl -I https://ehime-hojokin.jp/subsidy/992/
+curl -I https://ehime-hojokin.jp/subsidy/992
+curl -I 'https://ehime-hojokin.jp/subsidy/1298/?utm_source=test'
+curl -I https://ehime-hojokin.jp/
+curl -I https://ehime-hojokin.jp/column/kyufukin-hojokin-joseikin-chigai/
+curl -I https://ehime-hojokin.jp/admin
+```
+
+### 適用後確認結果
+
+| URL | 結果 |
+| --- | --- |
+| `https://ehime-hojokin.jp/subsidy/1298/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1298` |
+| `https://ehime-hojokin.jp/subsidy/997/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/997` |
+| `https://ehime-hojokin.jp/subsidy/992/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/992` |
+| `https://ehime-hojokin.jp/subsidy/1298` | `HTTP/2 200` |
+| `https://ehime-hojokin.jp/subsidy/997` | `HTTP/2 200` |
+| `https://ehime-hojokin.jp/subsidy/992` | `HTTP/2 200` |
+| `https://ehime-hojokin.jp/` | `HTTP/2 200` |
+| `https://ehime-hojokin.jp/column/kyufukin-hojokin-joseikin-chigai/` | `HTTP/2 200` |
+| `https://ehime-hojokin.jp/admin` | `HTTP/2 200` |
+
+トップページ、コラム詳細、管理画面は今回の `/subsidy/:id/` 限定ルールの影響を受けず、既存挙動を維持している。
+
+### 未対応事項
+
+- `https://ehime-hojokin.jp/subsidy/1298/?utm_source=test` は `HTTP/2 200` のまま。
+- Cloudflare Freeプランでは `regex_replace()` が使えなかったため、Wildcard pattern方式で対応した。
+- 今回のSearch Console分類ではクエリ付きURLは主因ではなかったため、クエリ付き末尾スラッシュは後回しにする。
+- 今回は `/column/:slug/`、`/area/:slug/`、`/purpose/:slug/`、`/feature/:slug/` の末尾スラッシュ正規化は行っていない。
+
+### Search Consoleで次に検証する項目
+
+今回の主因だった `/subsidy/:id/` の末尾スラッシュ重複には対応済み。Search Consoleでは次の順で「修正を検証」を実行する。
+
+1. ソフト404
+2. 重複: Googleが別正規を選択
+3. 重複: ユーザーにより正規ページとして選択されていません
+4. 代替ページ canonicalあり
+5. クロール済み - インデックス未登録
+
+`noindex タグによって除外されました` は末尾スラッシュとは別原因の可能性が高いため、Search Console URL検査で現在の判定を確認してから扱う。
+
