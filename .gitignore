@@ -35,3 +35,6 @@ ehime-scraper/.env.local
 logs/
 ehime-scraper/logs/
 *.log
+
+# Search Console export working files
+reports/search-console-url-classification/
