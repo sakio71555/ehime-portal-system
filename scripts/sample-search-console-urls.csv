@@ -1,0 +1,14 @@
+URL,Reason
+https://ehime-hojokin.jp/this-url-should-not-exist-codex,soft404-candidate
+https://ehime-hojokin.jp/area/not-found-test-codex,soft404-candidate
+https://ehime-hojokin.jp/subsidy/999999999,soft404-candidate
+https://ehime-hojokin.jp/column/not-found-test-codex,soft404-candidate
+https://ehime-hojokin.jp/expert-articles/not-found-test-codex,soft404-candidate
+https://ehime-hojokin.jp/ogp.jpg,static-asset-404-noise
+http://ehime-hojokin.jp/,http-canonicalization
+https://ehime-hojokin.jp/columns/,trailing-slash
+https://ehime-hojokin.jp/subsidy/1570/,trailing-slash
+https://ehime-hojokin.jp/subsidy/852,indexable-candidate
+https://ehime-hojokin.jp/column/kyufukin-hojokin-joseikin-chigai,indexable-candidate
+https://ehime-hojokin.jp/area/matsuyama,indexable-candidate
+https://ehime-hojokin.jp/search?keyword=補助金,intended-noindex-search

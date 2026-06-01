@@ -172,3 +172,51 @@ Search Consoleの検索パフォーマンスで、以下のような表示回数
 - 久万高原町以外の町村LP追加。
 - 給付金・子育て系コラムのさらなる拡張。
 - 固定LP本文のさらなる長文化と内部リンク強化。
+
+---
+
+## 2026-06-01 Search Console URL分類ヘルパー
+
+Search Consoleの「ページがインデックスに登録されない新しい要因」は、件数だけでは優先順位を誤りやすい。実URLをCSVでエクスポートし、URLパターン単位で分類してから、NotFound/404、301正規化、prerender/SSG、canonical調整のどれを先に行うか判断する。
+
+### CSVを分類する目的
+
+- `/subsidy/`、`/column/`、`/area/`、`/feature/` など、未登録理由の主対象を実URLベースで確認する。
+- 末尾スラッシュ、`http://`、`www`、`/index.html`、二重スラッシュ、クエリ付きURLが多いかを確認する。
+- 存在しないURLらしきものや画像/静的アセットが混ざっていないかを確認する。
+- 推測ではなく、Search Consoleのエクスポート結果を元に次フェーズの作業順を決める。
+
+### 使い方
+
+Search Consoleから対象レポートのURL一覧をCSVでエクスポートし、以下を実行する。
+
+```bash
+node scripts/classify-search-console-urls.mjs search-console-pages.csv
+```
+
+詳細結果を残す場合:
+
+```bash
+node scripts/classify-search-console-urls.mjs search-console-pages.csv --out classified-search-console-urls.csv --format csv
+node scripts/classify-search-console-urls.mjs search-console-pages.csv --out classified-search-console-urls.json
+```
+
+スクリプトは `URL`、`url`、`Page`、`ページ`、`対象URL` の列名をURL列として扱う。URL列が見つからない場合はエラーで終了する。
+
+### 分類後の判断
+
+- `/subsidy/` が多い場合は、補助金詳細ページのprerender/SSG、初期HTML、データなし404相当化を優先する。
+- `/column/` が多い場合は、コラム詳細のcanonical確認、初期HTML、SSG/prerenderを優先する。
+- `/area/`、`/purpose/`、`/feature/` が多い場合は、固定LPのtitle/description/canonical/h1/本文冒頭を初期HTMLで出す対応を優先する。
+- 末尾スラッシュ、`http://`、`www`、`/index.html`、二重スラッシュが多い場合は、Cloudflare Redirect RulesまたはNginxでの301正規化を優先する。
+- 存在しないURLらしきものが多い場合は、NotFound/404対応とSPA fallback 200問題の解消を優先する。
+- `/search` が多い場合は、意図した `noindex` 対象か、sitemapや内部リンクから不要に検出されていないかを確認する。
+- 画像/静的アセットが多い場合は、HTMLページのインデックス問題とは切り分け、404ノイズやキャッシュ参照として扱う。
+
+### サンプル確認
+
+```bash
+node scripts/classify-search-console-urls.mjs scripts/sample-search-console-urls.csv
+```
+
+サンプルCSVには、SPA fallback 200や正規化不足の確認で使ったURLを入れている。実CSVを入手したら、同じコマンドで分類し、上位URLパターンと不明URL一覧を確認する。
