@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { getFeaturePageBySlug } from '../featurePages';
 
 const areaLinks = [
   { label: '松山市の補助金', to: '/area/matsuyama' },
@@ -23,11 +24,32 @@ const purposeLinks = [
   { label: '人材育成・雇用関連助成金', to: '/search?keyword=人材' },
 ];
 
-const featureLinks = [
-  { label: '建設業・建築業の方必見', to: '/feature/construction' },
-  { label: '飲食店・小売店の方必見', to: '/feature/restaurant-retail' },
-  { label: '創業・IT導入・DXをお考えの方へ', to: '/feature/startup-digital' },
-];
+const industryFeatureLinks = [
+  'construction',
+  'restaurant-retail',
+  'manufacturing',
+  'agriculture',
+  'tourism',
+  'beauty-salon',
+].map((slug) => {
+  const feature = getFeaturePageBySlug(slug);
+  return { label: feature.title, to: feature.path };
+});
+
+const purposeFeatureLinks = [
+  'startup-digital',
+  'energy-equipment',
+  'sales-channel',
+  'housing-renovation',
+].map((slug) => {
+  const feature = getFeaturePageBySlug(slug);
+  return { label: feature.title, to: feature.path };
+});
+
+const personalFeatureLinks = ['childcare-family', 'personal-assistance'].map((slug) => {
+  const feature = getFeaturePageBySlug(slug);
+  return { label: feature.title, to: feature.path };
+});
 
 const guideLinks = [
   { label: '補助金の基礎知識', to: '/beginners' },
@@ -129,9 +151,21 @@ export default function InternalSeoLinks() {
       />
 
       <LinkGroup
-        title="人気の特集から補助金・助成金を探す"
-        description="業種や利用シーンに合わせて、確認しておきたい補助金・助成金をまとめています。"
-        links={featureLinks}
+        title="業種別特集から探す"
+        description="建設、製造、農業、観光、店舗運営など、業種に合わせて支援制度を探せます。"
+        links={industryFeatureLinks}
+      />
+
+      <LinkGroup
+        title="目的別特集から探す"
+        description="創業、IT導入、省エネ、販路開拓、住宅・空き家活用などのテーマで探せます。"
+        links={purposeFeatureLinks}
+      />
+
+      <LinkGroup
+        title="個人向け支援の特集から探す"
+        description="子育て、医療費助成、住宅改修、移住、福祉など暮らしに関わる支援制度を探せます。"
+        links={personalFeatureLinks}
       />
 
       <LinkGroup

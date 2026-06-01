@@ -10,6 +10,13 @@ import PublicColumns from './PublicColumns';
 import Simulator from './Simulator';
 import SEO from './components/SEO';
 import InternalSeoLinks from './components/InternalSeoLinks';
+import FeatureIcon from './components/FeatureIcon';
+import {
+  FEATURE_PAGES,
+  FEATURE_PAGE_GROUPS,
+  getFeatureKeywords,
+  getFeaturePageBySlug,
+} from './featurePages';
 import './EhimeSubsidyPortal.css';
 
 import {
@@ -167,80 +174,6 @@ const PURPOSE_LANDING_PAGES = [
   },
 ];
 
-const FEATURE_LANDING_PAGES = [
-  {
-    slug: 'construction',
-    title: '建設業・建築業の方必見｜愛媛県で使える補助金・助成金特集',
-    heading: '建設業・建築業の方におすすめの補助金・助成金',
-    description:
-      '愛媛県内の建設業・建築業・工務店・設備工事業の方が確認しておきたい補助金・助成金をまとめています。設備投資、省エネ、IT導入、人材確保、防災・BCP、事業承継など、建設関連事業者が活用しやすい制度を探せます。',
-    keywords: [
-      '建設業',
-      '建築業',
-      '工務店',
-      '設備工事',
-      '設備投資',
-      '省エネ',
-      '人材育成',
-      '雇用',
-      '生産性向上',
-      '業務効率化',
-      '防犯',
-      '防災',
-      'BCP',
-      '事業承継',
-    ],
-  },
-  {
-    slug: 'restaurant-retail',
-    title: '飲食店・小売店の方必見｜愛媛県で使える補助金・助成金特集',
-    heading: '飲食店・小売店の方におすすめの補助金・助成金',
-    description:
-      '愛媛県内の飲食店・小売店・店舗運営事業者の方が確認しておきたい補助金・助成金をまとめています。店舗改装、販路開拓、省力化、デジタル化、キャッシュレス対応、省エネ設備の導入などに活用できる制度を探せます。',
-    keywords: [
-      '飲食業',
-      '飲食店',
-      '小売業',
-      '小売店',
-      '店舗',
-      '店舗改装',
-      '販路開拓',
-      '販路拡大',
-      '設備投資',
-      '省力化',
-      '省人化',
-      'デジタル',
-      'キャッシュレス',
-      '省エネ',
-    ],
-  },
-  {
-    slug: 'startup-digital',
-    title: '創業・IT導入・DXをお考えの方へ｜愛媛県の補助金・助成金特集',
-    heading: '創業・IT導入・DXに使える補助金・助成金',
-    description:
-      '愛媛県内で創業・起業を考えている方、IT導入やDX、業務効率化を進めたい事業者向けの補助金・助成金をまとめています。ホームページ制作、ECサイト、業務システム、クラウドツール、デジタル化、販路開拓などに関する制度を探せます。',
-    keywords: [
-      '起業',
-      '創業',
-      'ベンチャー',
-      'デジタル',
-      '生産性向上',
-      '業務効率化',
-      '販路開拓',
-      '販路拡大',
-      '新規事業',
-      '第二創業',
-      'IT',
-      'DX',
-      'ホームページ',
-      'EC',
-      'システム',
-      'クラウド',
-    ],
-  },
-];
-
 function getSearchableText(item) {
   return [
     item?.title,
@@ -275,10 +208,234 @@ function filterItemsForLanding(items, page, type) {
     });
   }
 
+  if (type === 'feature') {
+    const featureKeywords = getFeatureKeywords(page).map((keyword) =>
+      String(keyword).toLowerCase()
+    );
+
+    return items.filter((item) => {
+      const text = getSearchableText(item);
+      const purposeTags = getPurposeTagList(item);
+      const industryTags = Array.isArray(item?.industries)
+        ? item.industries
+        : String(item?.industries || '')
+            .split(/[,\s、]+/)
+            .filter(Boolean);
+
+      const hasPurposeMatch = (page.purposeTags || []).some((tag) =>
+        purposeTags.includes(tag)
+      );
+      const hasIndustryMatch = (page.industryTags || []).some((tag) =>
+        industryTags.includes(tag)
+      );
+      const hasKeywordMatch = featureKeywords.some((keyword) => text.includes(keyword));
+
+      return hasPurposeMatch || hasIndustryMatch || hasKeywordMatch;
+    });
+  }
+
   return items.filter((item) => {
     const text = getSearchableText(item);
     return page.keywords.some((keyword) => text.includes(keyword.toLowerCase()));
   });
+}
+
+function FeatureListPage({ items, loading, colors }) {
+  const featureCounts = useMemo(() => {
+    return FEATURE_PAGES.reduce((acc, feature) => {
+      acc[feature.slug] = filterItemsForLanding(items, feature, 'feature').filter(
+        (item) => !isItemClosed(item)
+      ).length;
+      return acc;
+    }, {});
+  }, [items]);
+
+  return (
+    <>
+      <SEO
+        title="特集から探す｜愛媛県の補助金・助成金｜えひめ補助金ポータル"
+        description="業種・目的・個人向け支援など、特集別に愛媛県内の補助金・助成金・支援制度を探せます。"
+        canonical="/features"
+        jsonLd={[
+          buildCollectionJsonLd({
+            title: '特集から補助金・助成金を探す',
+            description:
+              '業種・目的・個人向け支援など、特集別に愛媛県内の補助金・助成金・支援制度を探せる一覧ページです。',
+            url: 'https://ehime-hojokin.jp/features',
+          }),
+          buildBreadcrumbJsonLd([
+            { name: 'ホーム', path: '/' },
+            { name: '特集から探す', path: '/features' },
+          ]),
+        ]}
+      />
+
+      <main className="main-wrapper">
+        <div className="disclaimer-text">
+          掲載情報はAIを活用して収集・整理したデータをもとに作成しています。申請前には必ず各制度の公式ページで最新情報をご確認ください。
+        </div>
+
+        <section style={{ textAlign: 'center', marginBottom: '42px' }}>
+          <p
+            style={{
+              margin: '0 0 10px',
+              color: colors.primary,
+              fontSize: '12px',
+              fontWeight: 800,
+              letterSpacing: '0.14em',
+            }}
+          >
+            FEATURE
+          </p>
+          <h1
+            style={{
+              margin: '0 0 14px',
+              color: colors.primaryText,
+              fontSize: '30px',
+              lineHeight: 1.35,
+              fontWeight: 800,
+            }}
+          >
+            特集から補助金・助成金を探す
+          </h1>
+          <p
+            style={{
+              maxWidth: '760px',
+              margin: '0 auto',
+              color: colors.textSub,
+              fontSize: '15px',
+              lineHeight: 1.8,
+            }}
+          >
+            業種別、目的別、個人向け支援など、探したいテーマから愛媛県内の補助金・助成金・支援制度を確認できます。
+          </p>
+        </section>
+
+        {FEATURE_PAGE_GROUPS.map((group) => (
+          <section key={group.title} style={{ marginBottom: '40px' }}>
+            <div className="title-section" style={{ marginBottom: '18px' }}>
+              <div>
+                <h2
+                  style={{
+                    margin: '0 0 6px',
+                    color: colors.primaryText,
+                    fontSize: '22px',
+                    fontWeight: 800,
+                  }}
+                >
+                  {group.title}
+                </h2>
+                <p style={{ margin: 0, color: colors.textSub, fontSize: '13px' }}>
+                  {group.description}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="feature-list-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                gridAutoRows: 'minmax(300px, auto)',
+                gap: '16px',
+                alignItems: 'stretch',
+              }}
+            >
+              {group.slugs
+                .map(getFeaturePageBySlug)
+                .filter(Boolean)
+                .map((feature) => (
+                  <Link
+                    key={feature.slug}
+                    to={feature.path}
+                    className="feature-list-card"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      height: '100%',
+                      minHeight: 0,
+                      backgroundColor: 'white',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '14px',
+                      padding: '22px',
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      <FeatureIcon slug={feature.slug} color={feature.color || colors.primary} size={36} />
+                      <span
+                        style={{
+                          fontSize: '12px',
+                          color: feature.color,
+                          fontWeight: 800,
+                          letterSpacing: '0.08em',
+                        }}
+                      >
+                        FEATURE
+                      </span>
+                    </div>
+                    <h3
+                      style={{
+                        margin: '0 0 10px',
+                        color: colors.primaryText,
+                        fontSize: '17px',
+                        lineHeight: 1.5,
+                        fontWeight: 800,
+                        minHeight: '76px',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {feature.title}
+                    </h3>
+                    <p
+                      style={{
+                        margin: '0 0 14px',
+                        color: colors.textSub,
+                        fontSize: '13px',
+                        lineHeight: 1.75,
+                        minHeight: '92px',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 4,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {feature.description}
+                    </p>
+                    <span
+                      style={{
+                        color: colors.primary,
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        marginTop: 'auto',
+                      }}
+                    >
+                      {loading ? '確認中' : `${featureCounts[feature.slug] || 0}件を確認`} →
+                    </span>
+                  </Link>
+                ))}
+            </div>
+          </section>
+        ))}
+
+        <InternalSeoLinks />
+      </main>
+    </>
+  );
 }
 
 function SeoLandingPage({ page, type, items, loading, colors }) {
@@ -297,12 +454,20 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
   const breadcrumbName =
     type === 'area' ? '地域から探す' : type === 'feature' ? '特集から探す' : '目的から探す';
   const shownItems = landingItems.slice(0, 12);
-  const heading = page.heading || page.title;
+  const heading = page.h1 || page.heading || page.title;
+  const leadText = page.leadText || page.description;
+  const featureKeywords = type === 'feature' ? getFeatureKeywords(page) : [];
+  const searchKeyword =
+    type === 'area' ? page.region : type === 'feature' ? featureKeywords[0] : page.keywords[0];
+  const relatedFeatures =
+    type === 'feature'
+      ? (page.relatedFeatureSlugs || []).map(getFeaturePageBySlug).filter(Boolean)
+      : [];
 
   return (
     <>
       <SEO
-        title={type === 'feature' ? page.title : `${page.title}｜事業者向け支援制度`}
+        title={type === 'feature' ? page.seoTitle || page.title : `${page.title}｜事業者向け支援制度`}
         description={page.description}
         canonical={canonical}
         jsonLd={[
@@ -369,9 +534,7 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
             </p>
 
             <Link
-              to={`/search?keyword=${encodeURIComponent(
-                type === 'area' ? page.region : page.keywords[0]
-              )}`}
+              to={`/search?keyword=${encodeURIComponent(searchKeyword || page.title)}`}
               style={{
                 color: colors.primary,
                 fontSize: '14px',
@@ -383,6 +546,85 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
             </Link>
           </div>
         </section>
+
+        {type === 'feature' && (
+          <section
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+              gap: '20px',
+              marginBottom: '34px',
+            }}
+            className="feature-page-intro-grid"
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                border: `1px solid ${colors.border}`,
+                borderRadius: '16px',
+                padding: '24px',
+              }}
+            >
+              <h2
+                style={{
+                  margin: '0 0 12px',
+                  color: colors.primaryText,
+                  fontSize: '20px',
+                  fontWeight: 800,
+                }}
+              >
+                このような方におすすめ
+              </h2>
+              <p
+                style={{
+                  margin: '0 0 18px',
+                  color: colors.textMain,
+                  fontSize: '14px',
+                  lineHeight: 1.8,
+                }}
+              >
+                {leadText}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {(page.targetKeywords || []).map((keyword) => (
+                  <span
+                    key={keyword}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '7px 10px',
+                      borderRadius: '999px',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      color: colors.primaryText,
+                      fontSize: '12px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {keyword}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div
+              style={{
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '16px',
+                padding: '22px',
+                color: '#713f12',
+                fontSize: '13px',
+                lineHeight: 1.8,
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: '8px' }}>
+                公式情報をご確認ください
+              </strong>
+              掲載情報は制度探しの入口として整理しています。申請期間、対象者、上限額、必要書類は必ず公式ページで最新情報をご確認ください。
+            </div>
+          </section>
+        )}
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '80px 0', color: colors.textSub }}>
@@ -405,8 +647,64 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
               color: colors.textSub,
             }}
           >
-            現在、この条件で募集中の補助金は見つかりませんでした。関連する制度は一覧検索から確認できます。
+            {type === 'feature'
+              ? '現在、この特集に該当する補助金・助成金は確認中です。関連する目的別ページや地域別ページもご確認ください。'
+              : '現在、この条件で募集中の補助金は見つかりませんでした。関連する制度は一覧検索から確認できます。'}
           </div>
+        )}
+
+        {type === 'feature' && relatedFeatures.length > 0 && (
+          <section style={{ marginTop: '40px' }}>
+            <div className="title-section" style={{ marginBottom: '16px' }}>
+              <h2
+                style={{
+                  margin: 0,
+                  color: colors.primaryText,
+                  fontSize: '22px',
+                  fontWeight: 800,
+                }}
+              >
+                関連する特集
+              </h2>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '14px',
+              }}
+            >
+              {relatedFeatures.map((feature) => (
+                <Link
+                  key={feature.slug}
+                  to={feature.path}
+                  style={{
+                    display: 'block',
+                    padding: '18px',
+                    borderRadius: '14px',
+                    border: '1px solid #e5e7eb',
+                    backgroundColor: 'white',
+                    color: 'inherit',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <div style={{ marginBottom: '10px' }}>
+                    <FeatureIcon slug={feature.slug} color={feature.color || colors.primary} size={34} />
+                  </div>
+                  <strong
+                    style={{
+                      display: 'block',
+                      color: colors.primaryText,
+                      fontSize: '15px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {feature.title}
+                  </strong>
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
 
         <InternalSeoLinks />
@@ -899,10 +1197,15 @@ export default function EhimeSubsidyPortal() {
             />
           ))}
 
-          {FEATURE_LANDING_PAGES.map((page) => (
+          <Route
+            path="/features"
+            element={<FeatureListPage items={subsidies} loading={loading} colors={colors} />}
+          />
+
+          {FEATURE_PAGES.map((page) => (
             <Route
               key={page.slug}
-              path={`/feature/${page.slug}`}
+              path={page.path}
               element={
                 <SeoLandingPage
                   page={page}

@@ -4,6 +4,16 @@ import { useNavigate } from 'react-router-dom';
 export default function Footer() {
   const navigate = useNavigate();
 
+  const footerLinks = [
+    { label: 'トップ', page: 'top' },
+    { label: '補助金を探す', page: 'search' },
+    { label: '特集から探す', page: 'features' },
+    { label: '専門家を探す', page: 'experts' },
+    { label: 'シミュレーター', page: 'simulator' },
+    { label: 'お役立ちコラム', page: 'columns' },
+    { label: 'はじめての方へ', page: 'beginners' },
+  ];
+
   const handleNavigation = (page) => {
     window.scrollTo(0, 0);
 
@@ -77,72 +87,36 @@ export default function Footer() {
               fontSize: '14px',
               color: 'rgba(255, 255, 255, 0.9)',
               flexWrap: 'wrap',
+              maxWidth: '620px',
+              justifyContent: 'flex-end',
             }}
           >
-            <span
-              onClick={() => handleNavigation('top')}
-              style={{ cursor: 'pointer', transition: 'color 0.2s' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
-              }}
-            >
-              トップ
-            </span>
-
-            <span
-              onClick={() => handleNavigation('search')}
-              style={{ cursor: 'pointer', transition: 'color 0.2s' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
-              }}
-            >
-              補助金を探す
-            </span>
-
-            <span
-              onClick={() => handleNavigation('experts')}
-              style={{ cursor: 'pointer', transition: 'color 0.2s' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
-              }}
-            >
-              専門家を探す
-            </span>
-
-            <span
-              onClick={() => handleNavigation('columns')}
-              style={{ cursor: 'pointer', transition: 'color 0.2s' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
-              }}
-            >
-              お役立ちコラム
-            </span>
-
-            <span
-              onClick={() => handleNavigation('beginners')}
-              style={{ cursor: 'pointer', transition: 'color 0.2s' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
-              }}
-            >
-              はじめての方へ
-            </span>
+            {footerLinks.map((link) => (
+              <button
+                key={link.page}
+                type="button"
+                onClick={() => handleNavigation(link.page)}
+                style={{
+                  cursor: 'pointer',
+                  transition: 'color 0.2s',
+                  color: 'rgba(255, 255, 255, 0.9)',
+                  background: 'transparent',
+                  border: 0,
+                  padding: 0,
+                  font: 'inherit',
+                  lineHeight: '1.6',
+                  whiteSpace: 'nowrap',
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.color = 'white';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
+                }}
+              >
+                {link.label}
+              </button>
+            ))}
           </div>
         </div>
 
