@@ -568,3 +568,26 @@ curl -I https://ehime-hojokin.jp/admin
 
 `noindex タグによって除外されました` は末尾スラッシュとは別原因の可能性が高いため、Search Console URL検査で現在の判定を確認してから扱う。
 
+
+---
+
+## 2026-06-01 ソフト404 4件の301確認
+
+Search Consoleのソフト404 4件について、対象URLがすべて `/subsidy/:id/` の末尾スラッシュURLであることを確認した。Cloudflare Redirect Rule適用後、全件が末尾スラッシュなしの正規URLへ301されている。
+
+| Search Console対象URL | curl確認結果 |
+| --- | --- |
+| `https://ehime-hojokin.jp/subsidy/1231/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1231` |
+| `https://ehime-hojokin.jp/subsidy/1298/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1298` |
+| `https://ehime-hojokin.jp/subsidy/1277/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1277` |
+| `https://ehime-hojokin.jp/subsidy/1283/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1283` |
+
+判断:
+
+- ソフト404 4件はすべて `/subsidy/:id/` の末尾スラッシュURLだった。
+- Cloudflare Redirect Ruleにより、全件が末尾スラッシュなしの正規URLへ301されている。
+- ソフト404についてはサイト側対応完了。
+- Search Console側は検証中のため、Googleの再クロール待ち。
+
+コード変更、npm build、本番デプロイは行っていない。
+
