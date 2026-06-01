@@ -6,6 +6,7 @@ export default function AdminBasicFields({
   updateEditForm,
   setEditForm,
   currentApplicationStatus,
+  onOpenItemById,
 }) {
   const applicationPeriodValue =
     editForm.application_period_text || editForm.deadline || '';
@@ -217,7 +218,21 @@ export default function AdminBasicFields({
 
         <div style={twoColumnGridNoMargin}>
           <div>
-            <label style={labelStyle}>重複元ID</label>
+            <div style={rowBetween}>
+              <label style={labelStyle}>重複元ID</label>
+              {editForm.duplicate_of_id && onOpenItemById && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onOpenItemById(editForm.duplicate_of_id);
+                  }}
+                  style={smallTextLinkButton}
+                >
+                  正データID {editForm.duplicate_of_id} を開く
+                </button>
+              )}
+            </div>
             <input
               type="number"
               min="1"
@@ -403,6 +418,17 @@ const smallBlueButton = {
   borderRadius: '4px',
   border: '1px solid #bfdbfe',
   cursor: 'pointer',
+};
+
+const smallTextLinkButton = {
+  backgroundColor: 'transparent',
+  border: 'none',
+  color: '#2563eb',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontWeight: 'bold',
+  padding: '0',
+  textDecoration: 'underline',
 };
 
 const smallPurpleButton = {

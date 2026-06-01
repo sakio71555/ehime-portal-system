@@ -9,6 +9,7 @@ import {
   sanitizeAIResultBeforeMerge,
   explainAIMergeProtection,
 } from './adminAIMergeRules';
+import { buildPublishQualityWarningMessage } from './adminQualityChecks';
 
 import AdminEditHeader from './components/AdminEditHeader';
 import AdminAIAssistPanel from './components/AdminAIAssistPanel';
@@ -846,14 +847,10 @@ function inferIndustryTagsFromForm(form) {
   return inferred;
 }
 
-function buildAutoTaggedPublishForm(form) {
+export function buildAutoTaggedPublishForm(form) {
   const inferredPurposes = inferPurposeTagsFromForm(form);
-  const purposes =
-    inferredPurposes.length > 0
-      ? inferredPurposes
-      : Array.isArray(form.purposes)
-        ? form.purposes
-        : [];
+  const currentPurposes = Array.isArray(form.purposes) ? form.purposes : [];
+  const purposes = uniqueArray([...currentPurposes, ...inferredPurposes]);
 
   const formWithPurposes = {
     ...form,
@@ -861,12 +858,8 @@ function buildAutoTaggedPublishForm(form) {
   };
 
   const inferredIndustries = inferIndustryTagsFromForm(formWithPurposes);
-  const industries =
-    inferredIndustries.length > 0
-      ? inferredIndustries
-      : Array.isArray(form.industries)
-        ? form.industries
-        : [];
+  const currentIndustries = Array.isArray(form.industries) ? form.industries : [];
+  const industries = uniqueArray([...currentIndustries, ...inferredIndustries]);
 
   return forceApplicationStatusByPeriod({
     ...form,
@@ -945,7 +938,7 @@ function buildDuplicatePublishBlockMessage(form) {
     form.duplicate_reason ? `理由: ${form.duplicate_reason}` : null,
     form.admin_note ? `メモ: ${form.admin_note}` : null,
     '',
-    '公開する場合は、重複元ID・重複理由・管理メモを確認し、重複候補ではない状態にしてから公開してください。',
+    '公開する場合は、重複元IDを空にして保存してから公開してください。',
   ]
     .filter(Boolean)
     .join('\n');
@@ -972,6 +965,7 @@ export default function AdminEditForm({
   supabase,
   onBack,
   onRefresh,
+  onOpenItemById,
 }) {
   const [editForm, setEditForm] = useState(() =>
     buildInitialEditForm(initialData)
@@ -1186,10 +1180,7 @@ export default function AdminEditForm({
       return;
     }
 
-    const baseFixedEditForm = forceApplicationStatusByPeriod(editForm);
-    const fixedEditForm = isCurrentlyPublished
-      ? baseFixedEditForm
-      : buildAutoTaggedPublishForm(baseFixedEditForm);
+    const fixedEditForm = forceApplicationStatusByPeriod(editForm);
 
     if (!(await validateDuplicateTarget(fixedEditForm))) return;
 
@@ -1218,7 +1209,10 @@ export default function AdminEditForm({
     const isCurrentlyPublished = editForm.crawl_status === 'published';
     const newStatus = isCurrentlyPublished ? 'draft' : 'published';
 
-    const fixedEditForm = forceApplicationStatusByPeriod(editForm);
+    const baseFixedEditForm = forceApplicationStatusByPeriod(editForm);
+    const fixedEditForm = isCurrentlyPublished
+      ? baseFixedEditForm
+      : buildAutoTaggedPublishForm(baseFixedEditForm);
 
     if (!(await validateDuplicateTarget(fixedEditForm))) return;
 
@@ -1233,6 +1227,11 @@ export default function AdminEditForm({
       );
 
       if (!shouldPublish) return;
+    }
+
+    if (!isCurrentlyPublished) {
+      const qualityWarning = buildPublishQualityWarningMessage(fixedEditForm);
+      if (qualityWarning && !window.confirm(qualityWarning)) return;
     }
 
     const payload = buildSubsidyUpdatePayload(fixedEditForm);
@@ -1546,6 +1545,7 @@ export default function AdminEditForm({
           updateEditForm={updateEditForm}
           setEditForm={setEditForm}
           currentApplicationStatus={currentApplicationStatus}
+          onOpenItemById={onOpenItemById}
         />
 
         <AdminDetailFields editForm={editForm} updateEditForm={updateEditForm} />

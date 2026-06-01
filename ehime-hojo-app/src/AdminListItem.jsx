@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  getQualityGrade,
+  getQualityIssues,
+  getSuggestedFeatures,
+} from './adminQualityChecks';
 
 const EXTERNAL_PORTALS = [
   'hojyokin-portal.jp', 'smart-hojokin.jp', 'subsidy-el.jp', 'biz-supporter.com',
@@ -41,10 +46,26 @@ const hasAdminReviewNote = (item) =>
 const AdminReviewNotice = ({ item, onOpenDuplicateTarget }) => {
   if (!hasAdminReviewNote(item)) return null;
 
+  const hasPublishedDuplicateConflict =
+    item?.duplicate_of_id && item?.crawl_status === 'published' && item?.is_active;
+
   return (
-    <div style={adminReviewNoticeStyle}>
-      <div style={{ fontWeight: 'bold', color: '#92400e', marginBottom: '4px' }}>
-        ⚠ 重複候補・非公開理由あり
+    <div
+      style={{
+        ...adminReviewNoticeStyle,
+        ...(hasPublishedDuplicateConflict ? publishedDuplicateWarningStyle : {}),
+      }}
+    >
+      <div
+        style={{
+          fontWeight: 'bold',
+          color: hasPublishedDuplicateConflict ? '#991b1b' : '#92400e',
+          marginBottom: '4px',
+        }}
+      >
+        {hasPublishedDuplicateConflict
+          ? '🚨 公開中ですが重複元IDが設定されています'
+          : '⚠ 重複候補・非公開理由あり'}
       </div>
       {item.duplicate_of_id && (
         <div>
@@ -68,8 +89,45 @@ const AdminReviewNotice = ({ item, onOpenDuplicateTarget }) => {
   );
 };
 
+const AdminQualitySummary = ({ item }) => {
+  const issues = getQualityIssues(item).filter(
+    (issue) => !['duplicate_candidate', 'admin_review_note'].includes(issue.code)
+  );
+  const suggestedFeatures = getSuggestedFeatures(item, 3);
+
+  if (issues.length === 0 && suggestedFeatures.length === 0) return null;
+
+  return (
+    <div style={qualitySummaryStyle}>
+      {issues.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {issues.map((issue) => (
+            <span
+              key={issue.code}
+              style={{
+                ...qualityIssueChipStyle,
+                ...(issue.severity === 'danger' ? dangerIssueChipStyle : {}),
+              }}
+            >
+              {issue.severity === 'danger' ? '🚨' : '⚠'} {issue.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {suggestedFeatures.length > 0 && (
+        <div style={featureSuggestionStyle}>
+          <span style={{ fontWeight: 'bold', color: '#0f766e' }}>特集候補:</span>{' '}
+          {suggestedFeatures.map((feature) => feature.title).join(' / ')}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVisibility, onArchive, onRestore, onOpenDuplicateTarget }) {
   const missingFields = getMissingFields(item);
+  const qualityGrade = getQualityGrade(item);
   
   // 🔥 UPDATE: official_url を優先して外部ポータル判定を行う
   const targetUrl = item.official_url || item.source_url;
@@ -85,6 +143,10 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             
             <span style={{ backgroundColor: '#e0f2fe', color: '#4338ca', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #bae6fd' }}>
               📍 {item.region_text || item.region || '地域不明'}
+            </span>
+
+            <span style={{ ...qualityGradeBadgeStyle, color: qualityGrade.color, backgroundColor: qualityGrade.backgroundColor, borderColor: qualityGrade.borderColor }}>
+              品質: {qualityGrade.label}
             </span>
             
             <span style={{ fontSize: '12px', color: '#6b7280' }}>🏢 {item.organization || '実施機関不明'}</span>
@@ -105,6 +167,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             </div>
           )}
 
+          <AdminQualitySummary item={item} />
           <AdminReviewNotice item={item} onOpenDuplicateTarget={onOpenDuplicateTarget} />
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -125,6 +188,10 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             <span style={{ backgroundColor: '#e0f2fe', color: '#4338ca', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #bae6fd' }}>
               📍 {item.region_text || item.region || '地域不明'}
             </span>
+
+            <span style={{ ...qualityGradeBadgeStyle, color: qualityGrade.color, backgroundColor: qualityGrade.backgroundColor, borderColor: qualityGrade.borderColor }}>
+              品質: {qualityGrade.label}
+            </span>
             
             <span style={{ fontSize: '12px', color: '#6b7280' }}>🏢 {item.organization || '実施機関不明'}</span>
           </div>
@@ -139,6 +206,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
             <span>⏰ 締切: {item.application_period_text || item.deadline || '不明'}</span>
           </div>
 
+          <AdminQualitySummary item={item} />
           <AdminReviewNotice
             item={item}
             onOpenDuplicateTarget={onOpenDuplicateTarget}
@@ -170,6 +238,10 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
           <span style={{ backgroundColor: '#e0f2fe', color: '#4338ca', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #bae6fd' }}>
             📍 {item.region_text || item.region || '地域不明'}
           </span>
+
+          <span style={{ ...qualityGradeBadgeStyle, color: qualityGrade.color, backgroundColor: qualityGrade.backgroundColor, borderColor: qualityGrade.borderColor }}>
+            品質: {qualityGrade.label}
+          </span>
           
           <span style={{ fontSize: '12px', color: '#6b7280' }}>🏢 {item.organization || '実施機関不明'}</span>
         </div>
@@ -184,6 +256,7 @@ export default function AdminListItem({ item, tab, onEdit, onDelete, onToggleVis
           <span>⏰ 元の締切: {item.application_period_text || item.deadline || '不明'}</span>
         </div>
 
+        <AdminQualitySummary item={item} />
         <AdminReviewNotice item={item} onOpenDuplicateTarget={onOpenDuplicateTarget} />
       </div>
       
@@ -209,6 +282,12 @@ const adminReviewNoticeStyle = {
   wordBreak: 'break-word',
 };
 
+const publishedDuplicateWarningStyle = {
+  backgroundColor: '#fef2f2',
+  border: '1px solid #fca5a5',
+  color: '#7f1d1d',
+};
+
 const inlineLinkButton = {
   backgroundColor: 'transparent',
   border: 'none',
@@ -218,4 +297,46 @@ const inlineLinkButton = {
   fontWeight: 'bold',
   padding: 0,
   textDecoration: 'underline',
+};
+
+const qualityGradeBadgeStyle = {
+  border: '1px solid',
+  borderRadius: '999px',
+  fontSize: '11px',
+  fontWeight: 'bold',
+  padding: '2px 8px',
+};
+
+const qualitySummaryStyle = {
+  backgroundColor: '#f8fafc',
+  border: '1px solid #e5e7eb',
+  borderRadius: '8px',
+  color: '#475569',
+  fontSize: '12px',
+  lineHeight: 1.6,
+  marginTop: '10px',
+  padding: '8px 10px',
+};
+
+const qualityIssueChipStyle = {
+  backgroundColor: '#fffbeb',
+  border: '1px solid #fde68a',
+  borderRadius: '999px',
+  color: '#92400e',
+  fontSize: '11px',
+  fontWeight: 'bold',
+  padding: '2px 8px',
+};
+
+const dangerIssueChipStyle = {
+  backgroundColor: '#fef2f2',
+  border: '1px solid #fecaca',
+  color: '#991b1b',
+};
+
+const featureSuggestionStyle = {
+  borderTop: '1px dashed #cbd5e1',
+  color: '#64748b',
+  marginTop: '8px',
+  paddingTop: '8px',
 };

@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import AdminListItem from './AdminListItem';
 import AdminDuplicateModal from './AdminDuplicateModal';
-import AdminEditForm from './AdminEditForm';
+import AdminEditForm, { buildAutoTaggedPublishForm } from './AdminEditForm';
 import AdminBatchScraperModal from './AdminBatchScraperModal';
 import { supabase } from './lib/supabaseClient';
+import {
+  QUALITY_FILTERS,
+  buildPublishQualityWarningMessage,
+  getQualityIssues,
+  matchesQualityFilter,
+} from './adminQualityChecks';
 
 const parseAmount = (amountStr) => {
   if (!amountStr || amountStr === '不明' || amountStr === '未定') return 0;
@@ -56,6 +62,20 @@ const getPublishedSortTime = (item) => {
 const hasAdminReviewNote = (item) =>
   Boolean(item?.admin_note || item?.duplicate_of_id || item?.duplicate_reason);
 
+const normalizeTagArray = (value) =>
+  Array.isArray(value) ? value.filter(Boolean) : [];
+
+const isSameTagSet = (a, b) => {
+  const left = [...new Set(normalizeTagArray(a))].sort();
+  const right = [...new Set(normalizeTagArray(b))].sort();
+  if (left.length !== right.length) return false;
+  return left.every((tag, index) => tag === right[index]);
+};
+
+const needsPublishedTagBackfill = (item) =>
+  normalizeTagArray(item?.purposes).length === 0 ||
+  normalizeTagArray(item?.industries).length === 0;
+
 const buildDuplicatePublishBlockMessage = (item) => [
   '⚠ 正データIDが設定された重複候補のため、このまま公開できません。',
   '',
@@ -64,7 +84,7 @@ const buildDuplicatePublishBlockMessage = (item) => [
   item?.duplicate_reason ? `理由: ${item.duplicate_reason}` : null,
   item?.admin_note ? `メモ: ${item.admin_note}` : null,
   '',
-  '公開する場合は、編集画面で重複元ID・重複理由・管理メモを確認し、重複候補ではない状態にしてください。',
+  '公開する場合は、編集画面で重複元IDを空にして保存してください。',
 ]
   .filter(Boolean)
   .join('\n');
@@ -91,11 +111,13 @@ export default function AdminDashboard() {
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [sortBy, setSortBy] = useState('fetched_at_desc'); 
   const [reviewFilter, setReviewFilter] = useState('all');
+  const [qualityFilter, setQualityFilter] = useState('all');
   
   const [editingItem, setEditingItem] = useState(null); 
   const [duplicateGroups, setDuplicateGroups] = useState([]);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [isBackfillingTags, setIsBackfillingTags] = useState(false);
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -132,9 +154,14 @@ export default function AdminDashboard() {
   };
 
   const getVisibleItems = (items) => {
-    const sortedItems = getSortedItems(items);
-    if (reviewFilter !== 'review_notes') return sortedItems;
-    return sortedItems.filter(hasAdminReviewNote);
+    let sortedItems = getSortedItems(items);
+    if (reviewFilter === 'review_notes') {
+      sortedItems = sortedItems.filter(hasAdminReviewNote);
+    }
+    if (qualityFilter !== 'all') {
+      sortedItems = sortedItems.filter((item) => matchesQualityFilter(item, qualityFilter));
+    }
+    return sortedItems;
   };
 
   const toggleVisibility = async (item) => {
@@ -151,6 +178,11 @@ export default function AdminDashboard() {
       );
 
       if (!shouldActivate) return;
+    }
+
+    if (!currentActiveStatus) {
+      const qualityWarning = buildPublishQualityWarningMessage(item);
+      if (qualityWarning && !window.confirm(qualityWarning)) return;
     }
 
     await supabase.from('subsidies').update({ is_active: !currentActiveStatus }).eq('id', item.id);
@@ -179,6 +211,9 @@ export default function AdminDashboard() {
       if (!shouldRestore) return;
     }
 
+    const qualityWarning = buildPublishQualityWarningMessage(item);
+    if (qualityWarning && !window.confirm(qualityWarning)) return;
+
     await supabase.from('subsidies').update({ crawl_status: 'published', is_active: true }).eq('id', item.id);
     setRefreshCounter(prev => prev + 1);
   };
@@ -192,7 +227,7 @@ export default function AdminDashboard() {
   const handleCheckDuplicates = async () => {
     const { data, error } = await supabase
       .from('subsidies')
-      .select('id, title, source_url, official_url, source_external_id, crawl_status, fetched_at, organization, admin_note, duplicate_of_id, duplicate_reason');
+      .select('id, title, source_url, official_url, source_external_id, crawl_status, fetched_at, organization, region_text, admin_note, duplicate_of_id, duplicate_reason');
     if (error) return alert('データ取得エラー: ' + error.message);
 
     const statusRank = { 'published': 1, 'archived': 2, 'draft': 3 };
@@ -222,6 +257,15 @@ export default function AdminDashboard() {
       return u;
     };
 
+    const normalizeLoose = (str) => {
+      if (!str || str === '未記載' || str === '不明') return null;
+      return String(str)
+        .normalize('NFKC')
+        .replace(/\s+/g, '')
+        .replace(/[・･/／｜|,、。．.（）()［\]【】「」『』:：;；]/g, '')
+        .toLowerCase();
+    };
+
     const groups = [];
 
     sortedData.forEach(item => {
@@ -237,9 +281,23 @@ export default function AdminDashboard() {
           const mExternalId = member.source_external_id || null;
           const isUrlMatch = nUrls.length > 0 && mUrls.length > 0 && nUrls.some((url) => mUrls.includes(url));
           const isExternalIdMatch = nExternalId && mExternalId && nExternalId === mExternalId;
-          const isTitleMatch = nTitle && mTitle && (
+          const isTitleSimilar = nTitle && mTitle && (
             nTitle === mTitle ||
             (nTitle.length > 7 && mTitle.length > 7 && (nTitle.includes(mTitle) || mTitle.includes(nTitle)))
+          );
+          const nOrganization = normalizeLoose(item.organization);
+          const mOrganization = normalizeLoose(member.organization);
+          const nRegion = normalizeLoose(item.region_text);
+          const mRegion = normalizeLoose(member.region_text);
+          const isOrganizationMatch = nOrganization && mOrganization && (
+            nOrganization === mOrganization ||
+            nOrganization.includes(mOrganization) ||
+            mOrganization.includes(nOrganization)
+          );
+          const isRegionMatch = nRegion && mRegion && (nRegion === mRegion);
+          const hasContext = Boolean(nOrganization || mOrganization || nRegion || mRegion);
+          const isTitleMatch = isTitleSimilar && (
+            !hasContext || isOrganizationMatch || isRegionMatch
           );
 
           if (isExternalIdMatch || isUrlMatch || isTitleMatch) {
@@ -334,6 +392,80 @@ export default function AdminDashboard() {
     });
   };
 
+  const handleBackfillPublishedTags = async () => {
+    const candidates = publishedItems.filter(needsPublishedTagBackfill);
+
+    if (candidates.length === 0) {
+      alert('公開中データで、利用目的タグまたは業種タグが未設定のものは見つかりませんでした。');
+      return;
+    }
+
+    const shouldRun = window.confirm(
+      [
+        `公開中データ ${candidates.length}件に、自動タグ補完を実行します。`,
+        '',
+        '既存の手動タグは消さず、自動判定できたタグだけを追加します。',
+        '利用目的タグ・業種タグのどちらも判定できないデータはスキップします。',
+        '',
+        '実行しますか？',
+      ].join('\n')
+    );
+
+    if (!shouldRun) return;
+
+    setIsBackfillingTags(true);
+
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const item of candidates) {
+      const nextForm = buildAutoTaggedPublishForm(item);
+      const nextPurposes = normalizeTagArray(nextForm.purposes);
+      const nextIndustries = normalizeTagArray(nextForm.industries);
+      const nextTags = normalizeTagArray(nextForm.tags);
+
+      const hasChange =
+        !isSameTagSet(item.purposes, nextPurposes) ||
+        !isSameTagSet(item.industries, nextIndustries) ||
+        !isSameTagSet(item.tags, nextTags);
+
+      if (!hasChange) {
+        skipped += 1;
+        continue;
+      }
+
+      const { error } = await supabase
+        .from('subsidies')
+        .update({
+          purposes: nextPurposes,
+          industries: nextIndustries,
+          tags: nextTags,
+        })
+        .eq('id', item.id);
+
+      if (error) {
+        failed += 1;
+      } else {
+        updated += 1;
+      }
+    }
+
+    setIsBackfillingTags(false);
+    setRefreshCounter(prev => prev + 1);
+
+    alert(
+      [
+        '公開中データのタグ補完が完了しました。',
+        '',
+        `対象: ${candidates.length}件`,
+        `更新: ${updated}件`,
+        `判定できずスキップ: ${skipped}件`,
+        `失敗: ${failed}件`,
+      ].join('\n')
+    );
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/'; 
@@ -346,6 +478,11 @@ export default function AdminDashboard() {
         ? publishedItems
         : archivedItems;
   const currentReviewCount = currentTabItems.filter(hasAdminReviewNote).length;
+  const currentQualityIssueCount = currentTabItems.filter((item) => getQualityIssues(item).length > 0).length;
+  const currentQualityFilter = QUALITY_FILTERS.find((filter) => filter.value === qualityFilter);
+  const currentQualityFilterCount = currentTabItems.filter((item) =>
+    matchesQualityFilter(item, qualityFilter)
+  ).length;
   const visibleDrafts = getVisibleItems(drafts);
   const visiblePublishedItems = getVisibleItems(publishedItems);
   const visibleArchivedItems = getVisibleItems(archivedItems);
@@ -398,6 +535,25 @@ export default function AdminDashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#111827', margin: 0 }}>📊 補助金データ管理</h2>
           <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={handleBackfillPublishedTags}
+              disabled={isBackfillingTags}
+              style={{
+                backgroundColor: isBackfillingTags ? '#94a3b8' : '#0f7b6c',
+                color: 'white',
+                padding: '10px 16px',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                cursor: isBackfillingTags ? 'not-allowed' : 'pointer',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 6px rgba(15, 123, 108, 0.18)'
+              }}
+            >
+              {isBackfillingTags ? '🏷 タグ補完中...' : '🏷 公開中タグ未設定を補完'}
+            </button>
             <button onClick={() => setShowBatchModal(true)} style={{ backgroundColor: '#2563eb', color: 'white', padding: '10px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 6px rgba(37, 99, 235, 0.2)' }}>
               🔗 URL一括データ収集
             </button>
@@ -408,7 +564,7 @@ export default function AdminDashboard() {
         </div>
         
         {editingItem ? (
-          <AdminEditForm initialData={editingItem} supabase={supabase} onBack={() => setEditingItem(null)} onRefresh={() => setRefreshCounter(prev => prev + 1)} />
+          <AdminEditForm initialData={editingItem} supabase={supabase} onBack={() => setEditingItem(null)} onRefresh={() => setRefreshCounter(prev => prev + 1)} onOpenItemById={handleOpenItemById} />
         ) : (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '2px solid #e5e7eb', paddingBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
@@ -445,10 +601,24 @@ export default function AdminDashboard() {
                   </span>
                 )}
 
+                <select
+                  value={qualityFilter}
+                  onChange={(e) => setQualityFilter(e.target.value)}
+                  style={{ padding: '8px 12px', borderRadius: '6px', border: qualityFilter === 'all' ? '1px solid #d1d5db' : '1px solid #f59e0b', backgroundColor: qualityFilter === 'all' ? 'white' : '#fffbeb', color: qualityFilter === 'all' ? '#374151' : '#92400e', fontSize: '14px', fontWeight: 'bold', outline: 'none', cursor: 'pointer' }}
+                >
+                  {QUALITY_FILTERS.map((filter) => (
+                    <option key={filter.value} value={filter.value}>
+                      {filter.value === 'all'
+                        ? `品質チェック (${currentQualityIssueCount})`
+                        : filter.label}
+                    </option>
+                  ))}
+                </select>
+
                 <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: 'white', color: '#374151', fontSize: '14px', outline: 'none', cursor: 'pointer' }}>
                   <option value="fetched_at_desc">✨ 新着順（取得日が新しい順）</option>
                   {activeTab === 'published' && (
-                    <option value="published_at_desc">✅ 公開された順（新しい順）</option>
+                    <option value="published_at_desc">✅ 公開・更新が新しい順</option>
                   )}
                   <option value="deadline_asc">⏰ 締切が近い順</option>
                   <option value="amount_desc">💰 上限金額が高い順</option>
@@ -456,6 +626,82 @@ export default function AdminDashboard() {
                 </select>
               </div>
             </div>
+
+            {reviewFilter === 'review_notes' && (
+              <div
+                style={{
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '10px',
+                  color: '#92400e',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  margin: '-10px 0 18px',
+                  padding: '12px 14px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span>⚠ 重複候補のみ表示中：{currentReviewCount}件</span>
+                <button
+                  type="button"
+                  onClick={() => setReviewFilter('all')}
+                  style={{
+                    backgroundColor: 'white',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '999px',
+                    color: '#92400e',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    padding: '6px 12px',
+                  }}
+                >
+                  解除
+                </button>
+              </div>
+            )}
+
+            {qualityFilter !== 'all' && (
+              <div
+                style={{
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '10px',
+                  color: '#374151',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  margin: '-10px 0 18px',
+                  padding: '12px 14px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span>🧭 品質チェック「{currentQualityFilter?.label}」で表示中：{currentQualityFilterCount}件</span>
+                <button
+                  type="button"
+                  onClick={() => setQualityFilter('all')}
+                  style={{
+                    backgroundColor: 'white',
+                    border: '1px solid #94a3b8',
+                    borderRadius: '999px',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    padding: '6px 12px',
+                  }}
+                >
+                  解除
+                </button>
+              </div>
+            )}
 
             <div style={{ display: 'grid', gap: '16px' }}>
               {activeTab === 'drafts' && (
