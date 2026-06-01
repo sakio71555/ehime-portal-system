@@ -57,6 +57,7 @@ body, html {
   max-width: 1280px; 
   margin: 0 auto; 
   padding: 0 24px; 
+  container-type: inline-size;
 }
 
 .title-section { 
@@ -78,12 +79,76 @@ body, html {
 .content-area { 
   flex: 1; 
   min-width: 0; 
+  container-type: inline-size;
 }
 
 .card-grid { 
   display: grid; 
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); 
   gap: 24px; 
+  align-items: stretch;
+}
+
+@media (max-width: 960px) {
+  .card-grid {
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+  }
+
+  .portal-subsidy-card {
+    height: auto !important;
+    align-self: start !important;
+  }
+
+  .portal-subsidy-tags {
+    margin-top: 0 !important;
+  }
+}
+
+@container (max-width: 720px) {
+  .card-grid {
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+  }
+
+  .portal-subsidy-card {
+    height: auto !important;
+    min-height: 0 !important;
+    align-self: start !important;
+    justify-content: flex-start !important;
+  }
+
+  .portal-subsidy-tags {
+    margin-top: 0 !important;
+  }
+
+  .portal-subsidy-footer {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    margin-top: 8px !important;
+  }
+
+  .portal-subsidy-actions {
+    width: 100% !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+  }
+
+  .portal-subsidy-note {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    text-align: left !important;
+    order: 2 !important;
+  }
+
+  .portal-subsidy-official-button {
+    width: 100% !important;
+    order: 1 !important;
+  }
 }
 
 /* サイドバー関連 */
@@ -233,6 +298,16 @@ body, html {
 /* =========================================
    スマホ表示用（レスポンシブ）
 ========================================= */
+@media (max-width: 1180px) and (min-width: 769px) {
+  .top-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .feature-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
 @media (max-width: 768px) {
   html,
   body,
@@ -374,6 +449,8 @@ body, html {
 
   .portal-subsidy-card {
     width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
     min-width: 0 !important;
     padding: 18px !important;
     border-radius: 14px !important;
@@ -463,6 +540,7 @@ body, html {
 
   .portal-subsidy-tags {
     gap: 6px !important;
+    margin-top: 0 !important;
   }
 
   .portal-subsidy-tags span {
@@ -473,8 +551,10 @@ body, html {
   .portal-subsidy-footer {
     flex-direction: column !important;
     align-items: stretch !important;
+    justify-content: flex-start !important;
     gap: 12px !important;
     margin-top: 8px !important;
+    padding-top: 14px !important;
   }
 
   .portal-subsidy-detail-link {
@@ -484,13 +564,17 @@ body, html {
 
   .portal-subsidy-actions {
     width: 100% !important;
-    flex-direction: column-reverse !important;
+    flex-direction: column !important;
     align-items: stretch !important;
     gap: 10px !important;
+    justify-content: flex-start !important;
   }
 
   .portal-subsidy-note {
     width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
     text-align: left !important;
     font-size: 11px !important;
     line-height: 1.5 !important;
@@ -518,19 +602,20 @@ body, html {
   }
 
   .top-visual-hero {
-    padding-bottom: 40px !important;
-    margin-bottom: 36px !important;
+    padding-bottom: 34px !important;
+    margin-bottom: 38px !important;
   }
 
   .top-visual-band {
     width: 100vw !important;
-    height: 78px !important;
+    height: 118px !important;
   }
 
   .top-visual-banner-frame {
-    width: calc(100vw - 44px) !important;
-    margin-top: 24px !important;
-    border-radius: 14px !important;
+    width: min(92vw, 430px) !important;
+    aspect-ratio: 1134 / 1387 !important;
+    margin-top: 18px !important;
+    border-radius: 16px !important;
   }
 
   .top-visual-arrow {
@@ -656,18 +741,43 @@ body, html {
   }
 
   .top-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .feature-list-grid {
     grid-template-columns: 1fr !important;
-    gap: 12px !important;
   }
 
   .top-feature-card {
-    padding: 18px 16px !important;
+    min-height: 190px !important;
+    padding: 16px 12px !important;
     border-radius: 12px !important;
   }
 
   .top-feature-icon {
-    font-size: 26px !important;
+    height: 54px !important;
     margin-bottom: 10px !important;
+  }
+
+  .top-feature-icon svg {
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  .top-feature-card-title {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+    min-height: 38px !important;
+    margin-bottom: 8px !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  .top-feature-card-description {
+    font-size: 11px !important;
+    line-height: 1.65 !important;
+    min-height: 54px !important;
+    -webkit-line-clamp: 3 !important;
   }
 
   .landing-page-title {
@@ -729,13 +839,14 @@ body, html {
 
   .top-visual-band {
     width: 100vw !important;
-    height: 66px !important;
+    height: 102px !important;
   }
 
   .top-visual-banner-frame {
-    width: calc(100vw - 32px) !important;
-    margin-top: 20px !important;
-    border-radius: 12px !important;
+    width: min(92vw, 390px) !important;
+    aspect-ratio: 1134 / 1387 !important;
+    margin-top: 16px !important;
+    border-radius: 14px !important;
   }
 
   .top-visual-arrow {
@@ -762,6 +873,7 @@ body, html {
 
   .portal-subsidy-card {
     padding: 16px !important;
+    height: auto !important;
   }
 
   .portal-subsidy-card-header {

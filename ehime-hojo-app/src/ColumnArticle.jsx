@@ -365,8 +365,9 @@ export default function ColumnArticle() {
 
       <Header activePage="columns" setActivePage={handleNavigation} />
 
-      <main style={{ flex: 1, paddingBottom: '80px' }}>
+      <main className="column-article-main" style={{ flex: 1, paddingBottom: '80px' }}>
         <div
+          className="column-article-container"
           style={{
             maxWidth: '800px',
             margin: '40px auto',
@@ -391,6 +392,7 @@ export default function ColumnArticle() {
           </div>
 
           <article
+            className="column-article-card"
             style={{
               backgroundColor: 'white',
               borderRadius: '16px',
@@ -401,6 +403,7 @@ export default function ColumnArticle() {
           >
             {column.thumbnail_url && (
               <div
+                className="column-article-thumbnail"
                 style={{
                   width: '100%',
                   height: '350px',
@@ -419,7 +422,7 @@ export default function ColumnArticle() {
               </div>
             )}
 
-            <div style={{ padding: '40px 48px' }}>
+            <div className="column-article-body" style={{ padding: '40px 48px' }}>
               <div
                 style={{
                   display: 'flex',
@@ -570,10 +573,22 @@ export default function ColumnArticle() {
       <Footer />
 
       <style>{`
+        .column-article-main,
+        .column-article-container,
+        .column-article-card,
+        .column-article-body {
+          box-sizing: border-box;
+          min-width: 0;
+        }
+
         .column-content {
           color: #374151;
           font-size: 16px;
           line-height: 1.8;
+          max-width: 100%;
+          min-width: 0;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
 
         .column-content h2 {
@@ -608,6 +623,87 @@ export default function ColumnArticle() {
           color: #2563eb;
           font-weight: bold;
           text-decoration: underline;
+          overflow-wrap: anywhere;
+        }
+
+        .column-content img,
+        .column-content video,
+        .column-content iframe {
+          max-width: 100%;
+          height: auto;
+        }
+
+        .column-content table {
+          display: block;
+          max-width: 100%;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          border-collapse: collapse;
+        }
+
+        .column-content pre {
+          max-width: 100%;
+          overflow-x: auto;
+          white-space: pre-wrap;
+        }
+
+        .column-content code {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        @media (max-width: 768px) {
+          .column-article-main {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: clip;
+          }
+
+          .column-article-container {
+            width: 100%;
+            max-width: 100%;
+            margin: 24px auto !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+          }
+
+          .column-article-card {
+            width: 100%;
+            max-width: 100%;
+            border-radius: 14px !important;
+          }
+
+          .column-article-thumbnail {
+            height: 220px !important;
+          }
+
+          .column-article-body {
+            width: 100%;
+            max-width: 100%;
+            padding: 24px 18px !important;
+          }
+
+          .column-article-body h1 {
+            font-size: 22px !important;
+            line-height: 1.45 !important;
+            overflow-wrap: break-word;
+            word-break: break-word;
+          }
+
+          .column-content {
+            font-size: 15px;
+            line-height: 1.75;
+          }
+
+          .column-content h2 {
+            font-size: 19px;
+            line-height: 1.45;
+          }
+
+          .column-content h3 {
+            font-size: 17px;
+            line-height: 1.45;
+          }
         }
       `}</style>
     </div>

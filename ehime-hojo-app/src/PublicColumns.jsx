@@ -120,6 +120,8 @@ export default function PublicColumns() {
     <div
       style={{
         maxWidth: '1000px',
+        width: '100%',
+        boxSizing: 'border-box',
         margin: '0 auto',
         padding: '40px 24px 80px',
       }}
@@ -169,7 +171,7 @@ export default function PublicColumns() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
             gap: '24px',
           }}
         >
@@ -191,6 +193,7 @@ export default function PublicColumns() {
                   border: `1px solid ${colors.border}`,
                   boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
                   transition: 'transform 0.2s, box-shadow 0.2s',
+                  minWidth: 0,
                 }}
                 onMouseOver={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
@@ -263,6 +266,7 @@ export default function PublicColumns() {
                     flex: 1,
                     display: 'flex',
                     flexDirection: 'column',
+                    minWidth: 0,
                   }}
                 >
                   {dateStr && (

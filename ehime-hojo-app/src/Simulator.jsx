@@ -266,6 +266,7 @@ export default function Simulator({ setActivePage }) {
 
   return (
     <div
+      className="simulator-page"
       style={{
         maxWidth: '800px',
         margin: '40px auto',
@@ -322,6 +323,7 @@ export default function Simulator({ setActivePage }) {
       </div>
 
       <div
+        className="simulator-card"
         style={{
           backgroundColor: 'white',
           borderRadius: '20px',
@@ -452,7 +454,7 @@ export default function Simulator({ setActivePage }) {
                 <span>💡</span> 枠の違いについて
               </h4>
 
-              <div style={{ overflowX: 'auto', marginBottom: '4px' }}>
+              <div className="simulator-table-wrapper" style={{ overflowX: 'auto', marginBottom: '4px' }}>
                 <table
                   style={{
                     width: '100%',
@@ -696,7 +698,7 @@ export default function Simulator({ setActivePage }) {
                     資本金または従業員の一方が、下記の数字以下であれば対象となります。
                   </p>
 
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="simulator-table-wrapper" style={{ overflowX: 'auto' }}>
                     <table
                       style={{
                         width: '100%',
@@ -743,7 +745,7 @@ export default function Simulator({ setActivePage }) {
                     従業員が下記の数字以下であれば対象となります。
                   </p>
 
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="simulator-table-wrapper" style={{ overflowX: 'auto' }}>
                     <table
                       style={{
                         width: '100%',
@@ -1190,6 +1192,7 @@ export default function Simulator({ setActivePage }) {
             </h3>
 
             <div
+              className="simulator-cost-grid"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -1378,6 +1381,7 @@ export default function Simulator({ setActivePage }) {
                   </p>
 
                   <div
+                    className="simulator-info-grid"
                     style={{
                       display: 'grid',
                       gridTemplateColumns:
@@ -1667,6 +1671,7 @@ export default function Simulator({ setActivePage }) {
                 </h4>
 
                 <div
+                  className="simulator-result-grid"
                   style={{
                     display: 'grid',
                     gridTemplateColumns:
@@ -1894,7 +1899,66 @@ export default function Simulator({ setActivePage }) {
           -moz-appearance: textfield;
         }
 
+        .simulator-page,
+        .simulator-page * {
+          box-sizing: border-box;
+          min-width: 0;
+        }
+
+        .simulator-table-wrapper {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .simulator-table-wrapper table {
+          max-width: none;
+        }
+
+        .simulator-page a,
+        .simulator-page p,
+        .simulator-page li,
+        .simulator-page span,
+        .simulator-page div {
+          overflow-wrap: break-word;
+          word-break: break-word;
+        }
+
         @media (max-width: 640px) {
+          .simulator-page {
+            width: 100%;
+            max-width: 100%;
+            margin: 24px auto !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+            overflow-x: clip;
+          }
+
+          .simulator-card {
+            width: 100%;
+            max-width: 100%;
+            padding: 24px 18px !important;
+            border-radius: 16px !important;
+            overflow: hidden;
+          }
+
+          .simulator-cost-grid,
+          .simulator-info-grid,
+          .simulator-result-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .simulator-table-wrapper {
+            margin-left: 0;
+            margin-right: 0;
+          }
+
+          .simulator-table-wrapper table {
+            width: max-content !important;
+          }
+
           h2 {
             font-size: 24px !important;
           }

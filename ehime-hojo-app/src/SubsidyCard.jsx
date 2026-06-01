@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   isItemClosed,
   getPurposeTagList,
@@ -72,7 +72,41 @@ const getTitleText = (item) => {
   return `${organization}：${title}`;
 };
 
+const getIsCompactCard = () => {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(max-width: 960px)').matches;
+};
+
+const useCompactSubsidyCard = () => {
+  const [isCompact, setIsCompact] = useState(getIsCompactCard);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const mediaQuery = window.matchMedia('(max-width: 960px)');
+    const handleChange = () => setIsCompact(mediaQuery.matches);
+
+    handleChange();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleChange);
+    } else {
+      mediaQuery.addListener(handleChange);
+    }
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleChange);
+      } else {
+        mediaQuery.removeListener(handleChange);
+      }
+    };
+  }, []);
+
+  return isCompact;
+};
+
 export default function SubsidyCard({ item }) {
+  const isCompact = useCompactSubsidyCard();
   const isClosed = isItemClosed(item);
   const officialUrl = getOfficialUrl(item);
 
@@ -109,7 +143,10 @@ export default function SubsidyCard({ item }) {
         cursor: 'pointer',
         transition: 'transform 0.2s, box-shadow 0.2s',
         position: 'relative',
-        height: '100%',
+        height: isCompact ? 'auto' : '100%',
+        minHeight: isCompact ? 0 : undefined,
+        alignSelf: isCompact ? 'start' : 'stretch',
+        justifyContent: isCompact ? 'flex-start' : undefined,
         boxSizing: 'border-box',
       }}
       onMouseOver={(e) => {
@@ -281,7 +318,7 @@ export default function SubsidyCard({ item }) {
           display: 'flex',
           flexWrap: 'wrap',
           gap: '8px',
-          marginTop: 'auto',
+          marginTop: isCompact ? 0 : 'auto',
         }}
       >
         {tags.slice(0, 5).map((tag, idx) => (
@@ -307,11 +344,13 @@ export default function SubsidyCard({ item }) {
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'flex-end',
-          marginTop: '16px',
+          alignItems: isCompact ? 'stretch' : 'flex-end',
+          flexWrap: 'wrap',
+          marginTop: isCompact ? '8px' : '16px',
           paddingTop: '16px',
           borderTop: '1px dashed #e2e8f0',
           gap: '12px',
+          flexDirection: isCompact ? 'column' : 'row',
         }}
       >
         <span
@@ -323,7 +362,9 @@ export default function SubsidyCard({ item }) {
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
-            whiteSpace: 'nowrap',
+            whiteSpace: isCompact ? 'normal' : 'nowrap',
+            flex: isCompact ? '0 0 auto' : '1 1 140px',
+            minWidth: 0,
           }}
         >
           詳細ページを見る <span>→</span>
@@ -333,8 +374,14 @@ export default function SubsidyCard({ item }) {
           className="portal-subsidy-actions"
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: isCompact ? 'stretch' : 'center',
             gap: '12px',
+            justifyContent: isCompact ? 'flex-start' : 'flex-end',
+            flex: isCompact ? '0 0 auto' : '1 1 240px',
+            flexWrap: 'wrap',
+            minWidth: 0,
+            width: isCompact ? '100%' : undefined,
+            flexDirection: isCompact ? 'column' : 'row',
           }}
         >
           <span
@@ -342,9 +389,13 @@ export default function SubsidyCard({ item }) {
             style={{
               fontSize: '10px',
               color: '#9ca3af',
-              width: '120px',
-              lineHeight: '1.2',
-              textAlign: 'right',
+              width: isCompact ? '100%' : 'auto',
+              minWidth: isCompact ? 0 : '96px',
+              maxWidth: isCompact ? 'none' : '150px',
+              flex: isCompact ? '0 0 auto' : '1 1 110px',
+              lineHeight: isCompact ? 1.5 : 1.2,
+              textAlign: isCompact ? 'left' : 'right',
+              order: isCompact ? 2 : 0,
             }}
           >
             文章等に誤りがある場合がありますので必ず公式サイトでご確認ください。
@@ -371,6 +422,11 @@ export default function SubsidyCard({ item }) {
               cursor: officialUrl ? 'pointer' : 'not-allowed',
               transition: 'opacity 0.2s',
               whiteSpace: 'nowrap',
+              flex: '0 0 auto',
+              maxWidth: '100%',
+              width: isCompact ? '100%' : undefined,
+              boxSizing: 'border-box',
+              order: isCompact ? 1 : 0,
             }}
             onMouseOver={(e) => {
               if (officialUrl) e.currentTarget.style.opacity = '0.9';
