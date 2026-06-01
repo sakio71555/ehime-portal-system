@@ -275,3 +275,110 @@ Search Consoleからエクスポートされた6つのCoverage Drilldown ZIPを 
 4. canonical関連でsitemap完全一致なのに代替扱いされている補助金詳細を確認する。React Helmetだけでなく初期HTMLまたはサーバー応答レベルのcanonicalを検討する。
 5. `/search?keyword=...` はnoindex対象として基本維持しつつ、sitemap混入や過剰な内部リンク露出がないか確認する。
 6. NotFound/SPA fallback 200対策は引き続き必要だが、今回の実CSVでは「存在しないURLらしき文字列」は0件のため、末尾スラッシュ正規化とsitemap/noindex不整合の後に扱う。
+
+---
+
+## 2026-06-01 末尾スラッシュ/noindex不整合 調査
+
+Search Console実CSV分類結果を踏まえ、最優先候補の `/subsidy/:id/` 末尾スラッシュ重複と、sitemap完全一致なのに `noindex` 扱いのURLを追加調査した。今回は設定変更・実装変更は行わない。
+
+### 末尾スラッシュ付き `/subsidy/` の確認結果
+
+代表URLでは、末尾スラッシュ付きURLはsitemapに存在せず、末尾スラッシュなしURLがsitemapに存在するケースが大半だった。
+
+| 理由 | 代表URL | slash版sitemap | slashなしsitemap |
+| --- | --- | --- | --- |
+| ソフト404 | `/subsidy/1298/` | なし | あり |
+| 重複: ユーザーにより正規未選択 | `/subsidy/997/` | なし | あり |
+| 重複: Googleが別正規を選択 | `/subsidy/992/` | なし | あり |
+| クロール済み - インデックス未登録 | `/subsidy/1005/` | なし | あり |
+| 代替ページ canonicalあり | `/subsidy/1008/` | なし | あり |
+
+例外として `/subsidy/1231/` と `/subsidy/1312/` は、slash版・slashなし版ともに現在のsitemapには存在しなかった。
+
+curl確認では、代表URLのslashあり・slashなしはいずれも `200 text/html` で、リダイレクトは発生しなかった。`curl` で取得できる初期HTMLにはcanonical/robotsは出ていない。補助金詳細のcanonical/robotsはReact HelmetによるJSレンダリング後の出力で、初期HTMLレベルでは確認できない状態。
+
+ソース上は `SubsidyDetail.jsx` で、データ取得成功時のcanonicalは `/subsidy/${subsidyId}` になり、`SubsidySEO` 経由で `index,follow` が出る。したがって、JSレンダリング後にデータ取得できた場合の自己参照canonicalは末尾スラッシュなしを指す設計。ただし、HTTP応答レベルでは末尾スラッシュ付きURLも200のままなので、Search Console上では重複URLとして拾われやすい。
+
+### 末尾スラッシュ301ルール案
+
+第一候補はCloudflare Redirect Rules。アプリに届く前に301で正規化し、sitemap掲載URLと実URLを一致させる。
+
+推奨順:
+
+1. 初期適用は `/subsidy/:id/` のみに限定する。
+2. 動作確認後、`/column/:slug/`、`/area/:slug/`、`/purpose/:slug/`、`/feature/:slug/` に拡張する。
+3. 全パス一括の末尾スラッシュ除去は、管理画面、静的アセット、将来のAPIパスへの影響を確認してからにする。
+
+Cloudflare Redirect Rules案:
+
+- 条件: hostが `ehime-hojokin.jp` かつ path が `^/subsidy/[0-9]+/$`
+- 301先: 同じhostの末尾スラッシュなしpath
+- クエリ文字列: preserve
+- トップページ `/` は対象外
+
+概念例:
+
+```text
+if http.host == "ehime-hojokin.jp"
+and http.request.uri.path matches "^/subsidy/[0-9]+/$"
+then 301 to https://ehime-hojokin.jp/subsidy/{id}
+```
+
+Nginxで行う場合の補足案:
+
+```nginx
+rewrite ^/subsidy/([0-9]+)/$ /subsidy/$1 permanent;
+```
+
+検証コマンド:
+
+```bash
+curl -I https://ehime-hojokin.jp/subsidy/992/
+curl -I https://ehime-hojokin.jp/subsidy/992
+curl -I https://ehime-hojokin.jp/subsidy/1008/
+curl -I https://ehime-hojokin.jp/subsidy/1008
+```
+
+期待値はslash付きが `301 Location: https://ehime-hojokin.jp/subsidy/{id}`、slashなしが `200`。
+
+### sitemap完全一致なのにnoindexの10件
+
+該当URLは補助金詳細6件、コラム4件。
+
+- `/subsidy/1574`
+- `/subsidy/1544`
+- `/subsidy/1545`
+- `/subsidy/1551`
+- `/subsidy/1547`
+- `/subsidy/1577`
+- `/column/guide-1777161754897`
+- `/column/guide-1777162206064`
+- `/column/guide-1777162276469`
+- `/column/guide-1777162025124`
+
+現在のsitemapには10件すべて完全一致で存在する。curlでは10件とも `200 text/html` で、初期HTMLにはrobots/canonicalが出ていなかった。
+
+Supabaseの読み取り確認では、補助金6件はすべて `crawl_status='published'`、`is_active=true`、`duplicate_of_id=null`。コラム4件もすべて `is_published=true`。現コード上も、補助金詳細は公開データ取得成功時は `index,follow`、データなし時のみ `noindex,nofollow`。コラム詳細も公開済みなら `index,follow`、not found時のみ `noindex,nofollow`。
+
+したがって、現在のデータ・コードだけを見る限り、10件が恒常的にnoindexになる条件は確認できなかった。Search Consoleのnoindexは、過去クロール時点の状態、JSレンダリング時のデータ取得失敗、またはデプロイ前後の状態差分が残っている可能性が高い。次フェーズでは、実装前にSearch ConsoleのURL検査で該当URLを再取得し、現在もnoindex判定かを確認する。
+
+### `/search?keyword=...` の検出経路
+
+CSV上の検索URLは合計9件。sitemapには `/search`、`search_term_string` ともに混入していなかった。
+
+検出経路候補:
+
+- `InternalSeoLinks.jsx` に地域・目的別の `/search?keyword=...` 内部リンクがある。
+- `EhimeSubsidyPortal.jsx` のSEO LP内に「一覧検索でさらに絞り込む」リンクとして `/search?keyword=...` がある。
+- Search Consoleには `/search?keyword={search_term_string}` も1件あり、過去のWebSite SearchAction由来または外部検出の名残の可能性がある。現在の active `buildWebsiteJsonLd` にはSearchActionは見当たらない。
+
+検索ページは現コードで `robots="noindex,follow"`。canonicalはキーワードありの場合 `/search?keyword=...` になっている。検索結果ページをnoindexにする方針自体は妥当だが、内部リンクで検索URLを増やすより、固定LPや特集LPへ寄せる方がSearch Consoleのノイズは減る。
+
+### 次に実装すべき優先順位
+
+1. `/subsidy/:id/` の末尾スラッシュを `/subsidy/:id` へ301する。
+2. Search ConsoleのURL検査でnoindex10件を再クロールし、現在もnoindex判定か確認する。
+3. noindexが残る場合は、補助金詳細/コラム詳細のデータ取得失敗時の挙動、初期HTML、デプロイ済みJSを追加確認する。
+4. `/search?keyword=...` の内部リンクを、固定LPや特集LPへ置き換えられる箇所から順に見直す。
+5. 補助金詳細の初期HTML/prerender/SSGは、末尾スラッシュ正規化後も `クロール済み - インデックス未登録` が残る場合に優先着手する。
