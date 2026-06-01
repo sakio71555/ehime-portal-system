@@ -613,3 +613,119 @@ Search Consoleのソフト404 4件について、対象URLがすべて `/subsidy
 
 コード変更、npm build、本番デプロイは行っていない。
 
+---
+
+## 2026-06-01 本番反映ログ
+
+Search Console対応、記事SEO最小修正、管理画面品質チェック、特集LP/内部リンク拡張、UIレスポンシブ改善、ScrollToTop追加をGitHub `main` 経由でVPS本番へ反映した。
+
+### 反映したコミット範囲
+
+- ローカルpush: `a05dc0a..99811fb main -> main`
+- 最新コミット: `99811fb Add route scroll reset`
+
+主な反映内容:
+
+- `/ogp.jpg` 実体追加。
+- Search Console URL分類スクリプト追加。
+- Search Console実CSV分類結果と `/subsidy/:id/` 末尾スラッシュ問題の記録。
+- 記事SEO canonical/noindex 修正。
+- 管理画面品質チェック、公開前警告、品質バッジ、タグ補完導線追加。
+- 特集LP、内部リンク、フッター導線拡張。
+- UIレスポンシブ、モバイルバナー改善。
+- ルート遷移時のScrollToTop追加。
+
+### VPS差分整理
+
+VPS作業前に以下の未コミット差分があったため、pull前に整理した。
+
+- `ehime-hojo-app/supabase/.temp/cli-latest`: Supabase CLI tempのバージョン差分だったため `git restore` で戻した。
+- `ehime-scraper/.env.bak.20260517-214556`: 秘密情報の可能性があるため中身は表示せず、`/root/ehime-env-backups/.env.bak.20260517-214556` へ退避した。退避先は `700`、ファイルは `600` 権限。
+
+整理後、VPSの `git status --short` はclean。
+
+### VPS pull / build
+
+```bash
+cd /opt/ehime-portal-system
+git fetch origin
+git pull --ff-only origin main
+
+cd /opt/ehime-portal-system/ehime-hojo-app
+npm run build
+```
+
+結果:
+
+- `git pull --ff-only origin main`: `a05dc0a..99811fb` へfast-forward。
+- `npm run build`: 成功。
+- sitemap生成: 静的ページ40件、補助金詳細418件、コラム詳細23件、専門家記事詳細1件、合計482件。
+- warning: Viteのchunk size warningのみ。
+- buildで `public/sitemap.xml` の `lastmod` が `2026-06-01` に更新されたが、既存運用どおり本番rsyncでは `sitemap.xml` を除外し、VPSのgit差分は戻した。
+
+### 本番バックアップ / 反映
+
+バックアップ:
+
+- `/root/ehime-portal-www-backup-20260601-223154.tar.gz`
+
+反映コマンド:
+
+```bash
+cd /opt/ehime-portal-system/ehime-hojo-app
+rsync -a --delete --exclude sitemap.xml dist/ /var/www/ehime-portal/
+```
+
+`sitemap.xml` は既存運用どおり上書き対象外。
+
+### curl確認結果
+
+| URL | 結果 |
+| --- | --- |
+| `https://ehime-hojokin.jp/` | `HTTP/2 200`, `content-type: text/html` |
+| `https://ehime-hojokin.jp/subsidy/1298` | `HTTP/2 200`, `content-type: text/html` |
+| `https://ehime-hojokin.jp/subsidy/1298/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/1298` |
+| `https://ehime-hojokin.jp/subsidy/997/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/997` |
+| `https://ehime-hojokin.jp/subsidy/992/` | `HTTP/2 301` -> `https://ehime-hojokin.jp/subsidy/992` |
+| `https://ehime-hojokin.jp/column/kyufukin-hojokin-joseikin-chigai/` | `HTTP/2 200`, `content-type: text/html` |
+| `https://ehime-hojokin.jp/expert-articles/ehime-house-building-subsidies-qa` | `HTTP/2 200`, `content-type: text/html` |
+| `https://ehime-hojokin.jp/admin` | `HTTP/2 200`, `content-type: text/html` |
+| `https://ehime-hojokin.jp/ogp.jpg` | `HTTP/2 200`, `content-type: image/jpeg` |
+
+補足:
+
+- `/subsidy/:id/` の末尾スラッシュURLはCloudflare Redirect Ruleにより301確認済み。
+- `/ogp.jpg` は `image/jpeg` として配信確認済み。
+- `curl -s` で初期HTMLをgrepした範囲では、コラム/専門家記事のHelmet由来metaは初期HTMLには出ない。これは現状CSR + Helmetの制約であり、初期HTML改善はprerender/SSG/SSR検討フェーズで扱う。
+
+### Search Console検証状況
+
+- 「重複しています。ユーザーにより、正規ページとして選択されていません」23ページは検証開始済み。
+- ソフト404 4件は `/subsidy/:id/` の末尾スラッシュURLで、Cloudflare 301によりサイト側対応済み。
+- Google再クロール待ち。Search Consoleの件数はすぐには減らない。
+
+### 未対応事項
+
+- クエリ付きの `/subsidy/:id/?utm_source=...` は今回の主因ではないため後回し。
+- `/column/:slug/`、`/area/:slug/`、`/purpose/:slug/`、`/feature/:slug/` の末尾スラッシュ正規化は未対応。
+- sitemap掲載ページの初期HTML個別化は未対応。prerender / SSG / SSR の検討が次フェーズ。
+- Viteのchunk size warningは継続。必要ならコード分割を検討する。
+
+### ロールバック手順
+
+本番配信ディレクトリだけ戻す場合:
+
+```bash
+tar -xzf /root/ehime-portal-www-backup-20260601-223154.tar.gz -C /var/www
+```
+
+コードも戻す場合:
+
+```bash
+cd /opt/ehime-portal-system
+git log --oneline -10
+git revert <対象コミット>
+cd /opt/ehime-portal-system/ehime-hojo-app
+npm run build
+rsync -a --delete --exclude sitemap.xml dist/ /var/www/ehime-portal/
+```
