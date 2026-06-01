@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import EhimeSubsidyPortal from './EhimeSubsidyPortal';
 import AdminDashboard from './AdminDashboard';
 import AdminExperts from './AdminExperts';
@@ -26,6 +26,16 @@ function AdminRouter({ session }) {
   return <AdminDashboard />;
 }
 
+function ScrollToTop() {
+  const { pathname, search } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname, search]);
+
+  return null;
+}
+
 function App() {
   const [session, setSession] = useState(null);
 
@@ -36,19 +46,22 @@ function App() {
   }, []);
 
   return (
-    <Routes>
-      {/* 管理画面のルーティング */}
-      <Route path="/admin/*" element={<AdminRouter session={session} />} />
+    <>
+      <ScrollToTop />
+      <Routes>
+        {/* 管理画面のルーティング */}
+        <Route path="/admin/*" element={<AdminRouter session={session} />} />
 
-      {/* 独立した詳細ページ */}
-      <Route path="/subsidy/:id" element={<SubsidyDetail />} />
-      <Route path="/column/:slug" element={<ColumnArticle />} />
-      <Route path="/expert-articles" element={<ExpertArticles />} />
-      <Route path="/expert-articles/:slug" element={<ExpertArticle />} />
+        {/* 独立した詳細ページ */}
+        <Route path="/subsidy/:id" element={<SubsidyDetail />} />
+        <Route path="/column/:slug" element={<ColumnArticle />} />
+        <Route path="/expert-articles" element={<ExpertArticles />} />
+        <Route path="/expert-articles/:slug" element={<ExpertArticle />} />
 
-      {/* ポータルサイト全体（/search, /simulator 等のルーティングは内部で処理） */}
-      <Route path="*" element={<EhimeSubsidyPortal />} />
-    </Routes>
+        {/* ポータルサイト全体（/search, /simulator 等のルーティングは内部で処理） */}
+        <Route path="*" element={<EhimeSubsidyPortal />} />
+      </Routes>
+    </>
   );
 }
 
