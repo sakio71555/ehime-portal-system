@@ -382,3 +382,132 @@ CSV上の検索URLは合計9件。sitemapには `/search`、`search_term_string`
 3. noindexが残る場合は、補助金詳細/コラム詳細のデータ取得失敗時の挙動、初期HTML、デプロイ済みJSを追加確認する。
 4. `/search?keyword=...` の内部リンクを、固定LPや特集LPへ置き換えられる箇所から順に見直す。
 5. 補助金詳細の初期HTML/prerender/SSGは、末尾スラッシュ正規化後も `クロール済み - インデックス未登録` が残る場合に優先着手する。
+
+---
+
+## 2026-06-01 `/subsidy/:id/` 301 Redirect Rules最終案
+
+Search Console実CSVでは、末尾スラッシュ付き `/subsidy/:id/` がsoft404、重複、canonical関連の共通要因になっている。sitemapは末尾スラッシュなし `/subsidy/:id` で統一されており、JSレンダリング後のcanonicalも `/subsidy/${id}` を指す設計のため、まず `/subsidy/:id/` だけを正規URLへ301する。
+
+### 適用前curl確認
+
+```bash
+curl -I https://ehime-hojokin.jp/subsidy/1298/
+curl -I https://ehime-hojokin.jp/subsidy/1298
+curl -I https://ehime-hojokin.jp/subsidy/997/
+curl -I https://ehime-hojokin.jp/subsidy/997
+curl -I https://ehime-hojokin.jp/subsidy/992/
+curl -I https://ehime-hojokin.jp/subsidy/992
+```
+
+確認結果:
+
+- `/subsidy/1298/`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+- `/subsidy/1298`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+- `/subsidy/997/`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+- `/subsidy/997`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+- `/subsidy/992/`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+- `/subsidy/992`: `HTTP/2 200`, `content-type: text/html`, `Location` なし
+
+### Cloudflare Redirect Rules案
+
+対象は `/subsidy/:id/` のみ。トップページ `/`、`/column/`、`/area/`、`/feature/`、`/admin`、API、静的アセットは対象外にする。
+
+Rule name:
+
+```text
+Redirect trailing slash subsidy detail URLs
+```
+
+When incoming requests match:
+
+```text
+(http.host eq "ehime-hojokin.jp" and http.request.uri.path matches r"^/subsidy/[0-9]+/$")
+```
+
+Dashboardでraw string構文が使えない場合の候補:
+
+```text
+(http.host eq "ehime-hojokin.jp" and http.request.uri.path matches "^/subsidy/[0-9]+/$")
+```
+
+Type:
+
+```text
+Dynamic redirect
+```
+
+Target URL expression:
+
+```text
+concat("https://ehime-hojokin.jp", regex_replace(http.request.uri.path, r"^/subsidy/([0-9]+)/$", "/subsidy/${1}"))
+```
+
+Status code:
+
+```text
+301
+```
+
+Preserve query string:
+
+```text
+true
+```
+
+クエリ付きURLの扱い:
+
+- 例: `/subsidy/1298/?utm_source=test` -> `/subsidy/1298?utm_source=test`
+- Search Console上の該当URLはクエリなしが中心だが、外部流入・計測パラメータを落とさないためクエリは維持する。
+- canonical統一だけを目的にクエリを破棄すると、広告・解析・外部リンク由来の文脈を失う可能性がある。
+
+### 全パス一括除去を今回は見送る理由
+
+- 今回の実CSVでは `/area/`、`/purpose/`、`/feature/`、`/expert-articles/`、静的アセット、API、`/admin` は主因として出ていない。
+- 全パス一括の末尾スラッシュ除去は、管理画面、静的ファイル、将来のAPIパス、外部サービス連携URLに影響する可能性がある。
+- `/subsidy/:id/` は数値IDに限定でき、sitemapとcanonicalも末尾スラッシュなしで揃っているため、最小範囲で安全に検証できる。
+
+### 適用後curl確認
+
+```bash
+curl -I https://ehime-hojokin.jp/subsidy/1298/
+curl -I https://ehime-hojokin.jp/subsidy/1298
+curl -I https://ehime-hojokin.jp/subsidy/997/
+curl -I https://ehime-hojokin.jp/subsidy/997
+curl -I https://ehime-hojokin.jp/subsidy/992/
+curl -I https://ehime-hojokin.jp/subsidy/992
+curl -I 'https://ehime-hojokin.jp/subsidy/1298/?utm_source=test'
+curl -I https://ehime-hojokin.jp/
+curl -I https://ehime-hojokin.jp/column/kyufukin-hojokin-joseikin-chigai/
+curl -I https://ehime-hojokin.jp/admin
+```
+
+期待値:
+
+- `/subsidy/1298/`, `/subsidy/997/`, `/subsidy/992/`: `301`, `Location: https://ehime-hojokin.jp/subsidy/{id}`
+- `/subsidy/1298`, `/subsidy/997`, `/subsidy/992`: `200`
+- `/subsidy/1298/?utm_source=test`: `301`, `Location: https://ehime-hojokin.jp/subsidy/1298?utm_source=test`
+- `/`: `200`
+- `/column/kyufukin-hojokin-joseikin-chigai/`: 今回対象外のため現状維持
+- `/admin`: 既存挙動維持
+
+### ロールバック手順
+
+1. Cloudflare Dashboardで対象zone `ehime-hojokin.jp` を開く。
+2. Rules -> Redirect Rules へ移動する。
+3. `Redirect trailing slash subsidy detail URLs` を無効化する。
+4. `curl -I https://ehime-hojokin.jp/subsidy/1298/` を実行し、301ではなく元の挙動に戻ったことを確認する。
+5. 問題がルール式やtarget式にある場合は、削除ではなく一旦無効化して調査ログを残す。
+6. Search Consoleの検証開始前にロールバックした場合は、検証リクエストを送らない。
+
+### Search Consoleで修正確認を押す対象
+
+Redirect Rules適用とcurl確認後、以下の順に「修正を検証」を実行する。
+
+1. ソフト404
+2. 重複しています。Google により、ユーザーがマークしたページとは異なるページが正規ページとして選択されました
+3. 重複しています。ユーザーにより、正規ページとして選択されていません
+4. 代替ページ（適切な canonical タグあり）
+5. クロール済み - インデックス未登録
+
+`noindex タグによって除外されました` は末尾スラッシュとは別に、Search Console URL検査で現在の判定を再確認してから扱う。
