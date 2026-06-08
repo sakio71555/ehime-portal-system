@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getTopFeaturePages } from './featurePages';
 import FeatureIcon from './components/FeatureIcon';
 import { supabase } from './lib/supabaseClient';
@@ -934,6 +934,65 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             </p>
           </div>
         </div>
+
+        <section
+          style={{
+            margin: '-42px 0 56px',
+            padding: '22px 24px',
+            backgroundColor: '#f8fafc',
+            border: '1px solid #dbe7e4',
+            borderRadius: '8px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: '0 0 6px',
+                color: '#2d3b33',
+                fontSize: '18px',
+                lineHeight: 1.45,
+                fontWeight: 800,
+              }}
+            >
+              愛媛県内の制度をまとめて確認
+            </h2>
+            <p
+              style={{
+                margin: 0,
+                color: colors.textMain,
+                fontSize: '14px',
+                lineHeight: 1.7,
+              }}
+            >
+              個人向け、事業者向け、市町村別、目的別に補助金・助成金・給付金を探せます。
+            </p>
+          </div>
+
+          <Link
+            to="/ehime-subsidy/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '44px',
+              padding: '0 18px',
+              borderRadius: '8px',
+              backgroundColor: colors.buttonColor,
+              color: '#ffffff',
+              fontSize: '14px',
+              fontWeight: 800,
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            愛媛県の補助金一覧を見る
+          </Link>
+        </section>
 
         <ExpertArticlesEntrySection
           articles={expertArticles}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, Routes, Route, useLocation } from 'react-router-dom';
 import TopPage from './TopPage';
+import EhimeSubsidyPage from './EhimeSubsidyPage';
 import ExpertsPage from './ExpertsPage';
 import BeginnersPage from './BeginnersPage';
 import SubsidyCard from './SubsidyCard';
@@ -1088,6 +1089,20 @@ export default function EhimeSubsidyPortal() {
                   featureColumns={featureColumns}
                 />
               </>
+            }
+          />
+
+          <Route
+            path="/ehime-subsidy"
+            element={
+              <EhimeSubsidyPage items={subsidies} loading={loading} colors={colors} />
+            }
+          />
+
+          <Route
+            path="/ehime-subsidy/"
+            element={
+              <EhimeSubsidyPage items={subsidies} loading={loading} colors={colors} />
             }
           />
 

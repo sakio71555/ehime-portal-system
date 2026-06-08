@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
 import SEO from './components/SEO';
@@ -452,7 +452,16 @@ export default function SubsidyDetail() {
             padding: '0 24px',
           }}
         >
-          <div className="subsidy-detail-back-wrap" style={{ marginBottom: '24px' }}>
+          <div
+            className="subsidy-detail-back-wrap"
+            style={{
+              marginBottom: '24px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '14px',
+            }}
+          >
             <button
               className="subsidy-detail-back-button"
               onClick={() => navigate('/search')}
@@ -468,6 +477,18 @@ export default function SubsidyDetail() {
             >
               ← 一覧へ戻る
             </button>
+
+            <Link
+              to="/ehime-subsidy/"
+              style={{
+                color: '#0f7b6c',
+                fontSize: '14px',
+                fontWeight: 800,
+                textDecoration: 'none',
+              }}
+            >
+              愛媛県の補助金一覧へ戻る
+            </Link>
           </div>
 
           <article

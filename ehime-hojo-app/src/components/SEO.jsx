@@ -11,9 +11,10 @@ export default function SEO({
   noindex = false,
   robots = null,
   jsonLd = null,
+  appendSiteName = true,
 }) {
   const pageTitle =
-    title.includes(SITE_NAME) || title.includes('愛媛の補助金')
+    !appendSiteName || title.includes(SITE_NAME) || title.includes('愛媛の補助金')
       ? title
       : `${title}｜${SITE_NAME}`;
 

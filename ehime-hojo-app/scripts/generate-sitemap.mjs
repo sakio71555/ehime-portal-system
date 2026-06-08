@@ -37,6 +37,7 @@ const FEATURE_ROUTES = [
 
 const STATIC_ROUTES = [
   { path: '/', changefreq: 'daily', priority: '1.0' },
+  { path: '/ehime-subsidy/', changefreq: 'daily', priority: '0.9' },
   { path: '/simulator', changefreq: 'monthly', priority: '0.7' },
   { path: '/experts', changefreq: 'monthly', priority: '0.7' },
   { path: '/expert-articles', changefreq: 'weekly', priority: '0.75' },
