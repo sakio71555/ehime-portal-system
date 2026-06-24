@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 
 const FEATURE_CATEGORY = '特集';
-const MIN_PUBLIC_ARTICLE_TEXT_LENGTH = 1200;
+const MIN_PUBLIC_ARTICLE_TEXT_LENGTH = 1800;
 
 const AI_ARTICLE_EDITORIAL_RULES = `
 【AI生成記事の品質ルール】
 - AIは下書き作成に使い、公開前に人間が事実・断定表現・公式確認導線を確認する前提で書いてください。
 - 他サイトや公式ページの要約・言い換えだけで終わらせず、愛媛県内の読者が次に判断できる整理を追加してください。
 - 本文には「誰向けか」「申請前に確認すること」「公式情報の確認先」「注意点」を必ず入れてください。
+- 本文は1800〜2200字程度を目安に、具体的な判断材料を入れてください。
 - 公式URLが入力素材にある場合は、本文中に公式情報へのリンクを入れてください。
 - 入力素材にない日付・金額・受付状況・採択率・事例・URLを作らないでください。
 - 「必ず採択」「必ずもらえる」「誰でも使える」などの断定表現を避けてください。
