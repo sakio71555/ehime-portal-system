@@ -18,6 +18,13 @@ const ALLOWED_TAGS = new Set([
   'EM',
   'BR',
   'A',
+  'TABLE',
+  'THEAD',
+  'TBODY',
+  'TR',
+  'TH',
+  'TD',
+  'CAPTION',
 ]);
 
 const ALLOWED_ATTRIBUTES = {
@@ -69,13 +76,13 @@ const sanitizeHtml = (html) => {
         if (tagName === 'A' && attrName === 'href') {
           const href = attr.value.trim();
 
-          if (!/^https?:\/\//i.test(href)) {
+          if (!/^https?:\/\//i.test(href) && !href.startsWith('/')) {
             child.removeAttribute('href');
           }
         }
       });
 
-      if (tagName === 'A') {
+      if (tagName === 'A' && /^https?:\/\//i.test(child.getAttribute('href') || '')) {
         child.setAttribute('target', '_blank');
         child.setAttribute('rel', 'noopener noreferrer');
       }
@@ -322,6 +329,9 @@ export default function ColumnArticle() {
   }
 
   const publishedDate = formatDate(column.published_at || column.created_at);
+  const pageTitle = column.append_site_name === false
+    ? column.seo_title || column.title
+    : `${column.seo_title || column.title} | 愛媛の補助金ポータル`;
 
   return (
     <div
@@ -335,9 +345,7 @@ export default function ColumnArticle() {
       }}
     >
       <Helmet>
-        <title>
-          {column.seo_title || column.title} | 愛媛の補助金ポータル
-        </title>
+        <title>{pageTitle}</title>
         <meta
           name="description"
           content={
@@ -437,9 +445,11 @@ export default function ColumnArticle() {
                     backgroundColor: '#3b82f6',
                     color: 'white',
                     fontSize: '12px',
+                    lineHeight: '1.4',
                     fontWeight: 'bold',
                     padding: '4px 12px',
                     borderRadius: '20px',
+                    maxWidth: '100%',
                   }}
                 >
                   {column.category || '補助金情報'}
@@ -639,6 +649,36 @@ export default function ColumnArticle() {
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
           border-collapse: collapse;
+          margin: 24px 0 32px;
+          font-size: 14px;
+        }
+
+        .column-content caption {
+          text-align: left;
+          color: #111827;
+          font-size: 15px;
+          font-weight: 800;
+          margin-bottom: 10px;
+        }
+
+        .column-content th,
+        .column-content td {
+          border: 1px solid #e5e7eb;
+          padding: 12px 14px;
+          text-align: left;
+          vertical-align: top;
+          min-width: 150px;
+          line-height: 1.7;
+        }
+
+        .column-content th {
+          background: #f8fafc;
+          color: #111827;
+          font-weight: 800;
+        }
+
+        .column-content td {
+          background: #ffffff;
         }
 
         .column-content pre {

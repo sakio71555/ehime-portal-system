@@ -251,8 +251,11 @@ export default function PublicColumns() {
                         padding: '6px 12px',
                         borderRadius: '20px',
                         fontSize: '12px',
+                        lineHeight: '1.4',
                         fontWeight: 'bold',
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                        display: 'inline-block',
+                        maxWidth: 'calc(100vw - 80px)',
                       }}
                     >
                       {col.category || 'コラム'}

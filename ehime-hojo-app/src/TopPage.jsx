@@ -26,6 +26,15 @@ const MOBILE_BANNERS = [
   '/m_banner3.png',
 ];
 
+const DESIGNER_COLUMN_BANNER = {
+  path: '/column/adobe-creative-cloud-pro-hojokin-designer',
+  image: '/images/columns/adobe-creative-cloud-pro-hojokin-designer.jpg',
+  label: 'デザイナー向け特集',
+  title: 'Creative Cloud Proに補助金は使える？',
+  description:
+    '個人事業主のデザイナーが、Adobe公式で買う前に確認したいIT導入支援事業者・対象ツール・申請順序を整理しました。',
+};
+
 const getFeatureCardIcon = (feature) => {
   const text = `${feature?.title || ''} ${feature?.category || ''}`;
 
@@ -312,6 +321,146 @@ function ExpertArticlesEntrySection({ articles, experts, loading, navigate }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function DesignerColumnBanner() {
+  return (
+    <Link
+      to={DESIGNER_COLUMN_BANNER.path}
+      className="top-designer-column-banner"
+      aria-label="デザイナー向け補助金特集"
+      style={{
+        margin: '-28px 0 56px',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '22px',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '22px',
+        backgroundColor: '#ffffff',
+        border: '1px solid #dbe7e4',
+        borderRadius: '12px',
+        boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)',
+        cursor: 'pointer',
+        textDecoration: 'none',
+        transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
+        minWidth: 0,
+      }}
+      onMouseOver={(e) => {
+        e.currentTarget.style.transform = 'translateY(-2px)';
+        e.currentTarget.style.boxShadow = '0 18px 36px rgba(15, 123, 108, 0.13)';
+        e.currentTarget.style.borderColor = '#0f7b6c';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = '0 12px 28px rgba(15, 23, 42, 0.06)';
+        e.currentTarget.style.borderColor = '#dbe7e4';
+      }}
+    >
+      <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '10px',
+            color: '#0f7b6c',
+            fontSize: '12px',
+            lineHeight: 1.4,
+            fontWeight: 900,
+            letterSpacing: '0.08em',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-grid',
+              placeItems: 'center',
+              width: '28px',
+              height: '28px',
+              borderRadius: '999px',
+              backgroundColor: '#ecfdf5',
+              color: '#0f7b6c',
+              fontSize: '15px',
+            }}
+          >
+            ✍
+          </span>
+          {DESIGNER_COLUMN_BANNER.label}
+        </div>
+
+        <h2
+          style={{
+            margin: '0 0 8px',
+            color: '#0f172a',
+            fontSize: 'clamp(19px, 2.4vw, 24px)',
+            lineHeight: 1.4,
+            fontWeight: 900,
+            letterSpacing: 0,
+            overflowWrap: 'break-word',
+          }}
+        >
+          {DESIGNER_COLUMN_BANNER.title}
+        </h2>
+
+        <p
+          style={{
+            margin: '0 0 16px',
+            color: '#475569',
+            fontSize: '14px',
+            lineHeight: 1.75,
+            overflowWrap: 'break-word',
+          }}
+        >
+          {DESIGNER_COLUMN_BANNER.description}
+        </p>
+
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '36px',
+            padding: '0 14px',
+            borderRadius: '8px',
+            backgroundColor: '#084a55',
+            color: '#ffffff',
+            fontSize: '13px',
+            fontWeight: 900,
+          }}
+        >
+          記事を読む →
+        </span>
+      </div>
+
+      <div
+        className="top-designer-column-image"
+        style={{
+          flex: '0 1 184px',
+          width: '184px',
+          maxWidth: '100%',
+          aspectRatio: '4 / 3',
+          borderRadius: '10px',
+          overflow: 'hidden',
+          backgroundColor: '#f1f5f9',
+          border: '1px solid #e5e7eb',
+        }}
+      >
+        <img
+          src={DESIGNER_COLUMN_BANNER.image}
+          alt=""
+          loading="lazy"
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            objectPosition: 'center center',
+          }}
+        />
+      </div>
+    </Link>
   );
 }
 
@@ -993,6 +1142,8 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
             愛媛県の補助金一覧を見る
           </Link>
         </section>
+
+        <DesignerColumnBanner />
 
         <ExpertArticlesEntrySection
           articles={expertArticles}
