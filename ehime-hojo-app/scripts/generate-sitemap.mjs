@@ -24,6 +24,7 @@ const FEATURE_ROUTES = [
   '/feature/construction',
   '/feature/restaurant-retail',
   '/feature/startup-digital',
+  '/feature/sole-proprietor',
   '/feature/manufacturing',
   '/feature/agriculture',
   '/feature/tourism',

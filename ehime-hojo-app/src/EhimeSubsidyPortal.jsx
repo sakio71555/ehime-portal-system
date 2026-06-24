@@ -58,6 +58,22 @@ function buildCollectionJsonLd({ title, description, url }) {
   };
 }
 
+function buildWebPageJsonLd({ title, description, url }) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: title,
+    description,
+    url,
+    inLanguage: 'ja',
+    isPartOf: {
+      '@type': 'WebSite',
+      name: '愛媛の補助金・助成金ポータル',
+      url: 'https://ehime-hojokin.jp/',
+    },
+  };
+}
+
 function buildBreadcrumbJsonLd(items) {
   return {
     '@context': 'https://schema.org',
@@ -523,12 +539,19 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
         title={type === 'feature' ? page.seoTitle || page.title : `${page.title}｜事業者向け支援制度`}
         description={page.description}
         canonical={canonical}
+        type={type === 'feature' && page.contentHtml ? 'article' : 'website'}
         jsonLd={[
-          buildCollectionJsonLd({
-            title: page.title,
-            description: page.description,
-            url: `https://ehime-hojokin.jp${canonical}`,
-          }),
+          type === 'feature' && page.contentHtml
+            ? buildWebPageJsonLd({
+                title: page.title,
+                description: page.description,
+                url: `https://ehime-hojokin.jp${canonical}`,
+              })
+            : buildCollectionJsonLd({
+                title: page.title,
+                description: page.description,
+                url: `https://ehime-hojokin.jp${canonical}`,
+              }),
           buildBreadcrumbJsonLd([
             { name: 'ホーム', path: '/' },
             { name: breadcrumbName, path: canonical },
@@ -677,6 +700,13 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
               掲載情報は制度探しの入口として整理しています。申請期間、対象者、上限額、必要書類は必ず公式ページで最新情報をご確認ください。
             </div>
           </section>
+        )}
+
+        {type === 'feature' && page.contentHtml && (
+          <section
+            className="feature-article-card"
+            dangerouslySetInnerHTML={{ __html: page.contentHtml }}
+          />
         )}
 
         {loading ? (

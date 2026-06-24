@@ -15,6 +15,7 @@ const areaLinks = [
 
 const purposeLinks = [
   { label: '創業・起業に使える補助金', to: '/purpose/startup' },
+  { label: '個人事業主向け補助金', to: '/purpose/sole-proprietor' },
   { label: '省エネ・設備投資向け補助金', to: '/purpose/energy-saving' },
   { label: 'IT導入・デジタル化補助金', to: '/purpose/digital' },
   { label: '設備投資に使える補助金', to: '/search?keyword=設備' },
@@ -38,6 +39,7 @@ const industryFeatureLinks = [
 
 const purposeFeatureLinks = [
   'startup-digital',
+  'sole-proprietor',
   'energy-equipment',
   'sales-channel',
   'housing-renovation',

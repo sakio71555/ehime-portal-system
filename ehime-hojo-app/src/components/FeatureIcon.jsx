@@ -46,6 +46,16 @@ function getIconPaths(slug) {
           <path d="M16 31h12" />
         </>
       );
+    case 'sole-proprietor':
+      return (
+        <>
+          <path d="M22 19a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" />
+          <path d="M11 35c1-7 5-11 11-11s10 4 11 11" />
+          <path d="M10 30h7" />
+          <path d="M27 30h7" />
+          <path d="M15 35h14" />
+        </>
+      );
     case 'manufacturing':
       return (
         <>

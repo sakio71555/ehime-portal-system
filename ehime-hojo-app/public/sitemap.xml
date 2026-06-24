@@ -213,6 +213,12 @@
     <priority>0.85</priority>
   </url>
   <url>
+    <loc>https://ehime-hojokin.jp/feature/sole-proprietor</loc>
+    <lastmod>2026-06-24</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
     <loc>https://ehime-hojokin.jp/feature/manufacturing</loc>
     <lastmod>2026-06-11</lastmod>
     <changefreq>daily</changefreq>
