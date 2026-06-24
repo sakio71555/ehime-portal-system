@@ -42,6 +42,7 @@ const BANNER_OVERLAYS = [
   {
     label: 'デザイナー向け特集',
     title: 'Creative Cloud Proに補助金は使える？',
+    titleLines: ['Creative Cloud Proに', '補助金は使える？'],
     description: 'Adobe公式で買う前に、対象ITツールと支援事業者を確認。',
     cta: '記事を読む',
   },
@@ -832,6 +833,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       srcSet={MOBILE_BANNERS[index] || banner}
                     />
                     <img
+                      className="top-visual-slide-image"
                       src={banner}
                       alt={
                         overlay
@@ -864,12 +866,14 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                       }}
                     >
                       <div
+                        className="top-visual-slide-copy"
                         style={{
                           maxWidth: '520px',
                           color: '#0f172a',
                         }}
                       >
                         <div
+                          className="top-visual-slide-label"
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -889,6 +893,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                         </div>
 
                         <h2
+                          className="top-visual-slide-title"
                           style={{
                             margin: '0 0 10px',
                             fontSize: 'clamp(23px, 3.2vw, 42px)',
@@ -898,10 +903,17 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                             color: '#0f172a',
                           }}
                         >
-                          {overlay.title}
+                          {overlay.titleLines
+                            ? overlay.titleLines.map((line) => (
+                                <span className="top-visual-title-line" key={line}>
+                                  {line}
+                                </span>
+                              ))
+                            : overlay.title}
                         </h2>
 
                         <p
+                          className="top-visual-slide-description"
                           style={{
                             margin: '0 0 18px',
                             color: '#334155',
@@ -914,6 +926,7 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
                         </p>
 
                         <span
+                          className="top-visual-slide-cta"
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
