@@ -46,14 +46,14 @@ const cityLinks = [
   { label: '宇和島市', to: '/area/uwajima' },
   { label: '新居浜市', to: '/area/niihama' },
   { label: '西条市', to: '/area/saijo' },
-  { label: '大洲市', to: '/search?keyword=大洲市' },
+  { label: '大洲市', to: '/area/ozu' },
   { label: '西予市', to: '/area/seiyo' },
 ];
 
 const purposeLinks = [
   { label: '住宅・リフォーム', to: '/purpose/housing' },
   { label: '創業・起業', to: '/purpose/startup' },
-  { label: '設備投資', to: '/search?keyword=設備投資' },
+  { label: '設備投資', to: '/feature/energy-equipment' },
   { label: '省エネ・太陽光・蓄電池', to: '/purpose/energy-saving' },
   { label: '子育て・医療・福祉', to: '/purpose/childcare' },
   { label: '農業・漁業', to: '/feature/agriculture' },
@@ -304,6 +304,7 @@ export default function EhimeSubsidyPage({ items = [], loading = false, colors }
 
             <Link
               to="/search"
+              rel="nofollow"
               style={{
                 color: primaryColor,
                 fontSize: '14px',

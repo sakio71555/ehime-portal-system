@@ -6,11 +6,11 @@ const areaLinks = [
   { label: '松山市の補助金', to: '/area/matsuyama' },
   { label: '今治市の補助金', to: '/area/imabari' },
   { label: '新居浜市の補助金', to: '/area/niihama' },
-  { label: '西予市の補助金', to: '/search?keyword=西予市' },
-  { label: '宇和島市の補助金', to: '/search?keyword=宇和島市' },
-  { label: '四国中央市の補助金', to: '/search?keyword=四国中央市' },
-  { label: '西条市の補助金', to: '/search?keyword=西条市' },
-  { label: '大洲市の補助金', to: '/search?keyword=大洲市' },
+  { label: '西予市の補助金', to: '/area/seiyo' },
+  { label: '宇和島市の補助金', to: '/area/uwajima' },
+  { label: '四国中央市の補助金', to: '/area/shikokuchuo' },
+  { label: '西条市の補助金', to: '/area/saijo' },
+  { label: '大洲市の補助金', to: '/area/ozu' },
 ];
 
 const purposeLinks = [
@@ -18,11 +18,11 @@ const purposeLinks = [
   { label: '個人事業主向け補助金', to: '/purpose/sole-proprietor' },
   { label: '省エネ・設備投資向け補助金', to: '/purpose/energy-saving' },
   { label: 'IT導入・デジタル化補助金', to: '/purpose/digital' },
-  { label: '設備投資に使える補助金', to: '/search?keyword=設備' },
-  { label: '販路開拓・展示会補助金', to: '/search?keyword=販路' },
-  { label: '農業・就農支援補助金', to: '/search?keyword=農業' },
-  { label: '観光・宿泊業向け補助金', to: '/search?keyword=観光' },
-  { label: '人材育成・雇用関連助成金', to: '/search?keyword=人材' },
+  { label: '設備投資に使える補助金', to: '/feature/energy-equipment' },
+  { label: '販路開拓・展示会補助金', to: '/feature/sales-channel' },
+  { label: '農業・就農支援補助金', to: '/feature/agriculture' },
+  { label: '観光・宿泊業向け補助金', to: '/feature/tourism' },
+  { label: '人材育成・雇用関連助成金', to: '/ehime-subsidy/' },
 ];
 
 const industryFeatureLinks = [

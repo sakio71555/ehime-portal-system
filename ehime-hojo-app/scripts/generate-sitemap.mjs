@@ -52,6 +52,8 @@ const STATIC_ROUTES = [
   { path: '/area/seiyo', changefreq: 'daily', priority: '0.85' },
   { path: '/area/yawatahama', changefreq: 'daily', priority: '0.85' },
   { path: '/area/saijo', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/ozu', changefreq: 'daily', priority: '0.85' },
+  { path: '/area/shikokuchuo', changefreq: 'daily', priority: '0.85' },
   { path: '/area/kumakogen', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/startup', changefreq: 'daily', priority: '0.85' },
   { path: '/purpose/energy-saving', changefreq: 'daily', priority: '0.85' },

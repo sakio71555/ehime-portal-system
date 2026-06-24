@@ -6,7 +6,12 @@ function renderFeatureList(items = []) {
 }
 
 function renderFeatureLinks(links = []) {
-  return links.map((link) => `<a href="${link.href}">${link.label}</a>`).join('');
+  return links
+    .map((link) => {
+      const rel = String(link.href || '').startsWith('/search') ? ' rel="nofollow"' : '';
+      return `<a href="${link.href}"${rel}>${link.label}</a>`;
+    })
+    .join('');
 }
 
 function renderFeatureRows(rows = []) {
@@ -165,8 +170,8 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '建設関連の補助金を探す', href: '/search?keyword=建設' },
-        { label: '設備投資の補助金を探す', href: '/search?keyword=設備' },
+        { label: '建設関連の補助金を探す', href: '/feature/construction' },
+        { label: '設備投資の補助金を探す', href: '/feature/energy-equipment' },
         { label: '省エネ支援を探す', href: '/feature/energy-equipment' },
         { label: '住宅・リフォーム支援を見る', href: '/feature/housing-renovation' },
       ],
@@ -258,8 +263,8 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '飲食店の補助金を探す', href: '/search?keyword=飲食店' },
-        { label: '小売店の補助金を探す', href: '/search?keyword=小売店' },
+        { label: '飲食店の補助金を探す', href: '/feature/restaurant-retail' },
+        { label: '小売店の補助金を探す', href: '/feature/restaurant-retail' },
         { label: '販路開拓特集を見る', href: '/feature/sales-channel' },
         { label: '省エネ・設備投資を見る', href: '/feature/energy-equipment' },
       ],
@@ -352,7 +357,7 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '創業支援を探す', href: '/search?keyword=創業' },
+        { label: '創業支援を探す', href: '/purpose/startup' },
         { label: 'IT導入を探す', href: '/purpose/it-introduction' },
         { label: 'デジタル化支援を探す', href: '/purpose/digital' },
         { label: 'AI関連補助金を探す', href: '/purpose/ai' },
@@ -549,13 +554,13 @@ export const FEATURE_PAGES = [
       <p>愛媛県内で事業をしている個人事業主は、国の制度だけでなく、愛媛県・市町村の制度も確認しておきたいところです。松山市、今治市、宇和島市、新居浜市、西条市など、地域によって創業支援、店舗改装、省エネ設備、空き店舗活用、移住創業などの制度が分かれることがあります。</p>
       <p>また、「補助金」だけでなく、「助成金」「給付金」「支援金」など言葉を変えて探すと、自治体独自の制度を見つけやすくなります。募集期間が短い制度や、予算上限に達すると早期終了する制度もあるため、定期的に確認することが大切です。</p>
       <div class="feature-link-grid">
-        <a href="/search?keyword=個人事業主">個人事業主で検索</a>
-        <a href="/search?keyword=創業">創業支援を探す</a>
-        <a href="/search?keyword=IT導入">IT導入を探す</a>
-        <a href="/search?keyword=デジタル">デジタル化を探す</a>
-        <a href="/search?keyword=販路開拓">販路開拓を探す</a>
-        <a href="/search?keyword=設備">設備投資を探す</a>
-        <a href="/search?keyword=省エネ">省エネ支援を探す</a>
+        <a href="/purpose/sole-proprietor">個人事業主向け補助金を見る</a>
+        <a href="/purpose/startup">創業支援を探す</a>
+        <a href="/purpose/it-introduction">IT導入を探す</a>
+        <a href="/purpose/digital">デジタル化を探す</a>
+        <a href="/feature/sales-channel">販路開拓を探す</a>
+        <a href="/feature/energy-equipment">設備投資を探す</a>
+        <a href="/purpose/energy-saving">省エネ支援を探す</a>
         <a href="/feature/startup-digital">創業・IT導入特集</a>
         <a href="/feature/sales-channel">販路開拓特集</a>
         <a href="/feature/energy-equipment">省エネ・設備投資特集</a>
@@ -593,11 +598,11 @@ export const FEATURE_PAGES = [
       <h2>えひめ補助金ポータルで探せる個人事業主向け支援</h2>
       <p>えひめ補助金ポータルでは、愛媛県内の補助金・助成金・支援制度を、地域や目的別に探せます。個人事業主の場合は、まず「個人事業主」「フリーランス」「創業」「起業」「IT導入」「デジタル化」「AI」「販路開拓」「店舗改装」「設備投資」「省エネ」「給付金」「支援金」などのキーワードで探すのがおすすめです。</p>
       <div class="feature-cta-list">
-        <a class="feature-cta-button" href="/search?keyword=個人事業主">個人事業主向け補助金を探す</a>
-        <a class="feature-cta-button" href="/search?keyword=創業">創業・起業支援を探す</a>
-        <a class="feature-cta-button" href="/search?keyword=IT導入">IT導入・デジタル化支援を探す</a>
-        <a class="feature-cta-button" href="/search?keyword=販路開拓">販路開拓の補助金を探す</a>
-        <a class="feature-cta-button" href="/search?keyword=省エネ">省エネ・設備投資の補助金を探す</a>
+        <a class="feature-cta-button" href="/purpose/sole-proprietor">個人事業主向け補助金を探す</a>
+        <a class="feature-cta-button" href="/purpose/startup">創業・起業支援を探す</a>
+        <a class="feature-cta-button" href="/purpose/it-introduction">IT導入・デジタル化支援を探す</a>
+        <a class="feature-cta-button" href="/feature/sales-channel">販路開拓の補助金を探す</a>
+        <a class="feature-cta-button" href="/feature/energy-equipment">省エネ・設備投資の補助金を探す</a>
       </div>
 
       <h2>まとめ</h2>
@@ -608,9 +613,9 @@ export const FEATURE_PAGES = [
         <h2>個人事業主向けの補助金を探したい方へ</h2>
         <p>個人事業主・フリーランスでも、事業内容や導入目的によっては補助金・助成金・給付金を活用できる可能性があります。愛媛県内で使える支援制度を探したい方は、地域や目的に合わせて最新情報を確認してみてください。</p>
         <div class="feature-cta-list">
-          <a class="feature-cta-button" href="/search?keyword=個人事業主">個人事業主向け補助金を探す</a>
-          <a class="feature-cta-button" href="/search?keyword=IT導入">IT導入・デジタル化支援を探す</a>
-          <a class="feature-cta-button" href="/search?keyword=創業">創業・起業支援を探す</a>
+          <a class="feature-cta-button" href="/purpose/sole-proprietor">個人事業主向け補助金を探す</a>
+          <a class="feature-cta-button" href="/purpose/it-introduction">IT導入・デジタル化支援を探す</a>
+          <a class="feature-cta-button" href="/purpose/startup">創業・起業支援を探す</a>
         </div>
       </div>
 
@@ -696,9 +701,9 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '製造業の補助金を探す', href: '/search?keyword=製造' },
-        { label: 'ものづくり補助金を探す', href: '/search?keyword=ものづくり' },
-        { label: '設備投資を探す', href: '/search?keyword=設備' },
+        { label: '製造業の補助金を探す', href: '/feature/manufacturing' },
+        { label: 'ものづくり補助金を探す', href: '/feature/manufacturing' },
+        { label: '設備投資を探す', href: '/feature/energy-equipment' },
         { label: '省エネ支援を見る', href: '/feature/energy-equipment' },
       ],
       ctaLead:
@@ -776,8 +781,8 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '農業の補助金を探す', href: '/search?keyword=農業' },
-        { label: '漁業の補助金を探す', href: '/search?keyword=漁業' },
+        { label: '農業の補助金を探す', href: '/feature/agriculture' },
+        { label: '漁業の補助金を探す', href: '/feature/agriculture' },
         { label: '販路開拓支援を見る', href: '/feature/sales-channel' },
         { label: '省エネ支援を見る', href: '/feature/energy-equipment' },
       ],
@@ -856,8 +861,8 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '観光関連の補助金を探す', href: '/search?keyword=観光' },
-        { label: '宿泊業の補助金を探す', href: '/search?keyword=宿泊' },
+        { label: '観光関連の補助金を探す', href: '/feature/tourism' },
+        { label: '宿泊業の補助金を探す', href: '/feature/tourism' },
         { label: '販路開拓支援を見る', href: '/feature/sales-channel' },
         { label: '省エネ支援を見る', href: '/feature/energy-equipment' },
       ],
@@ -936,8 +941,8 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '美容室の補助金を探す', href: '/search?keyword=美容' },
-        { label: 'サロンの補助金を探す', href: '/search?keyword=サロン' },
+        { label: '美容室の補助金を探す', href: '/feature/beauty-salon' },
+        { label: 'サロンの補助金を探す', href: '/feature/beauty-salon' },
         { label: '販路開拓支援を見る', href: '/feature/sales-channel' },
         { label: '店舗向け支援を見る', href: '/feature/restaurant-retail' },
       ],
@@ -1016,9 +1021,9 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '医療関連の補助金を探す', href: '/search?keyword=医療' },
-        { label: '介護関連の補助金を探す', href: '/search?keyword=介護' },
-        { label: '福祉支援を探す', href: '/search?keyword=福祉' },
+        { label: '医療関連の補助金を探す', href: '/feature/medical-welfare' },
+        { label: '介護関連の補助金を探す', href: '/feature/medical-welfare' },
+        { label: '福祉支援を探す', href: '/feature/medical-welfare' },
         { label: '省エネ支援を見る', href: '/feature/energy-equipment' },
       ],
       ctaLead:
@@ -1096,8 +1101,8 @@ export const FEATURE_PAGES = [
       ],
       links: [
         { label: '住宅補助金を探す', href: '/purpose/housing' },
-        { label: 'リフォーム支援を探す', href: '/search?keyword=リフォーム' },
-        { label: '空き家支援を探す', href: '/search?keyword=空き家' },
+        { label: 'リフォーム支援を探す', href: '/feature/housing-renovation' },
+        { label: '空き家支援を探す', href: '/feature/housing-renovation' },
         { label: '省エネ支援を見る', href: '/feature/energy-equipment' },
       ],
       ctaLead:
@@ -1177,7 +1182,7 @@ export const FEATURE_PAGES = [
       links: [
         { label: '子育て支援を探す', href: '/purpose/childcare' },
         { label: '給付金を探す', href: '/purpose/benefits' },
-        { label: '医療費助成を探す', href: '/search?keyword=医療費助成' },
+        { label: '医療費助成を探す', href: '/purpose/childcare' },
         { label: '個人向け支援を見る', href: '/feature/personal-assistance' },
       ],
       ctaLead:
@@ -1255,8 +1260,8 @@ export const FEATURE_PAGES = [
       ],
       links: [
         { label: '省エネ補助金を探す', href: '/purpose/energy-saving' },
-        { label: '設備投資を探す', href: '/search?keyword=設備' },
-        { label: '太陽光支援を探す', href: '/search?keyword=太陽光' },
+        { label: '設備投資を探す', href: '/feature/energy-equipment' },
+        { label: '太陽光支援を探す', href: '/purpose/energy-saving' },
         { label: '住宅省エネを見る', href: '/feature/housing-renovation' },
       ],
       ctaLead:
@@ -1338,9 +1343,9 @@ export const FEATURE_PAGES = [
         '公式ページと募集要項を確認した',
       ],
       links: [
-        { label: '販路開拓補助金を探す', href: '/search?keyword=販路開拓' },
-        { label: 'Web制作支援を探す', href: '/search?keyword=ホームページ' },
-        { label: 'EC支援を探す', href: '/search?keyword=EC' },
+        { label: '販路開拓補助金を探す', href: '/feature/sales-channel' },
+        { label: 'Web制作支援を探す', href: '/feature/sales-channel' },
+        { label: 'EC支援を探す', href: '/feature/sales-channel' },
         { label: '創業・IT導入特集を見る', href: '/feature/startup-digital' },
       ],
       ctaLead:
@@ -1427,7 +1432,7 @@ export const FEATURE_PAGES = [
         '公式ページや自治体窓口を確認した',
       ],
       links: [
-        { label: '個人向け支援を探す', href: '/search?keyword=個人向け' },
+        { label: '個人向け支援を探す', href: '/feature/personal-assistance' },
         { label: '給付金を探す', href: '/purpose/benefits' },
         { label: '子育て支援を見る', href: '/feature/childcare-family' },
         { label: '住宅支援を見る', href: '/feature/housing-renovation' },

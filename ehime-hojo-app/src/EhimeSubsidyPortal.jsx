@@ -138,6 +138,20 @@ const AREA_LANDING_PAGES = [
       '西条市で利用できる補助金・助成金・給付金・支援制度を探せます。創業、設備投資、省エネ、農業、子育て、住宅関連支援の確認に役立ちます。',
   },
   {
+    slug: 'ozu',
+    region: '大洲市',
+    title: '大洲市の補助金・助成金・給付金一覧',
+    description:
+      '大洲市で利用できる補助金・助成金・給付金・支援制度をまとめています。創業、設備投資、販路開拓、移住・定住、住宅、子育て関連支援を確認できます。',
+  },
+  {
+    slug: 'shikokuchuo',
+    region: '四国中央市',
+    title: '四国中央市の補助金・助成金・給付金一覧',
+    description:
+      '四国中央市で利用できる補助金・助成金・給付金・支援制度を探せます。事業者向け支援、設備投資、省エネ、創業、子育て、住宅関連支援の確認に役立ちます。',
+  },
+  {
     slug: 'kumakogen',
     region: '久万高原町',
     title: '久万高原町の給付金・商品券・補助金一覧',
@@ -611,6 +625,7 @@ function SeoLandingPage({ page, type, items, loading, colors }) {
 
             <Link
               to={`/search?keyword=${encodeURIComponent(searchKeyword || page.title)}`}
+              rel="nofollow"
               style={{
                 color: colors.primary,
                 fontSize: '14px',
