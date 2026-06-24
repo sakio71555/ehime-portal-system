@@ -244,10 +244,10 @@ export const STATIC_SEO_COLUMNS = [
         <li><a href="/feature/sales-channel">販路開拓・売上アップに関する補助金特集</a></li>
         <li><a href="/feature/energy-equipment">設備投資・省エネに関する補助金特集</a></li>
         <li><a href="/simulator">補助金かんたん診断を使う</a></li>
-        <li><a href="/search?keyword=IT導入">IT導入の補助金を探す</a></li>
-        <li><a href="/search?keyword=デジタル">デジタル化の補助金を探す</a></li>
-        <li><a href="/search?keyword=AI">AI関連の補助金を探す</a></li>
-        <li><a href="/search?keyword=個人事業主">個人事業主向けの補助金を探す</a></li>
+        <li><a href="/purpose/it-introduction">IT導入の補助金を探す</a></li>
+        <li><a href="/purpose/digital">デジタル化の補助金を探す</a></li>
+        <li><a href="/purpose/ai">AI関連の補助金を探す</a></li>
+        <li><a href="/purpose/sole-proprietor">個人事業主向けの補助金を探す</a></li>
       </ul>
     `,
   },

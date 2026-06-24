@@ -111,6 +111,24 @@
     <priority>0.85</priority>
   </url>
   <url>
+    <loc>https://ehime-hojokin.jp/purpose/it-introduction</loc>
+    <lastmod>2026-06-24</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/purpose/ai</loc>
+    <lastmod>2026-06-24</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ehime-hojokin.jp/purpose/sole-proprietor</loc>
+    <lastmod>2026-06-24</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
     <loc>https://ehime-hojokin.jp/purpose/benefits</loc>
     <lastmod>2026-06-11</lastmod>
     <changefreq>daily</changefreq>

@@ -18,12 +18,33 @@ const BANNERS = [
   '/banner4.png',
   '/banner5.png',
   '/banner6.png',
+  '/banner-adobe-designer-subsidy.png',
 ];
 
 const MOBILE_BANNERS = [
   '/m_banner1.png',
   '/m_banner2.png',
   '/m_banner3.png',
+  '/m_banner-adobe-designer-subsidy.png',
+];
+
+const BANNER_LINKS = [
+  '',
+  '',
+  '',
+  '/column/adobe-creative-cloud-pro-hojokin-designer',
+];
+
+const BANNER_OVERLAYS = [
+  null,
+  null,
+  null,
+  {
+    label: 'デザイナー向け特集',
+    title: 'Creative Cloud Proに補助金は使える？',
+    description: 'Adobe公式で買う前に、対象ITツールと支援事業者を確認。',
+    cta: '記事を読む',
+  },
 ];
 
 const DESIGNER_COLUMN_BANNER = {
@@ -794,44 +815,166 @@ export default function TopPage({ recentSubsidies, latestColumns, featureColumns
               willChange: 'transform',
             }}
           >
-            {BANNERS.map((banner, index) => (
-              <div
-                key={banner}
-                className="top-visual-slide"
-                style={{
-                  width: `${100 / BANNERS.length}%`,
-                  flex: `0 0 ${100 / BANNERS.length}%`,
-                  height: '100%',
-                  backgroundColor: '#ffffff',
-                }}
-              >
-                <picture
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'block',
-                  }}
-                >
-                  <source
-                    media="(max-width: 768px)"
-                    srcSet={MOBILE_BANNERS[index] || banner}
-                  />
-                  <img
-                    src={banner}
-                    alt={`愛媛県の補助金・助成金ポータルのプロモーションバナー ${index + 1}`}
-                    draggable="false"
+            {BANNERS.map((banner, index) => {
+              const link = BANNER_LINKS[index];
+              const overlay = BANNER_OVERLAYS[index];
+              const slideInner = (
+                <>
+                  <picture
                     style={{
                       width: '100%',
                       height: '100%',
                       display: 'block',
-                      objectFit: 'cover',
-                      objectPosition: 'center center',
-                      backgroundColor: '#ffffff',
                     }}
-                  />
-                </picture>
-              </div>
-            ))}
+                  >
+                    <source
+                      media="(max-width: 768px)"
+                      srcSet={MOBILE_BANNERS[index] || banner}
+                    />
+                    <img
+                      src={banner}
+                      alt={
+                        overlay
+                          ? 'デザイナー向けCreative Cloud Pro補助金特集バナー'
+                          : `愛媛県の補助金・助成金ポータルのプロモーションバナー ${index + 1}`
+                      }
+                      draggable="false"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'block',
+                        objectFit: 'cover',
+                        objectPosition: 'center center',
+                        backgroundColor: '#ffffff',
+                      }}
+                    />
+                  </picture>
+
+                  {overlay && (
+                    <div
+                      className="top-visual-slide-overlay"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: 'clamp(24px, 5vw, 72px)',
+                        pointerEvents: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <div
+                        style={{
+                          maxWidth: '520px',
+                          color: '#0f172a',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            minHeight: '28px',
+                            padding: '0 10px',
+                            borderRadius: '999px',
+                            backgroundColor: '#ecfdf5',
+                            color: '#0f7b6c',
+                            fontSize: '12px',
+                            lineHeight: 1.4,
+                            fontWeight: 900,
+                            letterSpacing: '0.08em',
+                            marginBottom: '12px',
+                          }}
+                        >
+                          {overlay.label}
+                        </div>
+
+                        <h2
+                          style={{
+                            margin: '0 0 10px',
+                            fontSize: 'clamp(23px, 3.2vw, 42px)',
+                            lineHeight: 1.25,
+                            fontWeight: 900,
+                            letterSpacing: 0,
+                            color: '#0f172a',
+                          }}
+                        >
+                          {overlay.title}
+                        </h2>
+
+                        <p
+                          style={{
+                            margin: '0 0 18px',
+                            color: '#334155',
+                            fontSize: 'clamp(13px, 1.4vw, 17px)',
+                            lineHeight: 1.75,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {overlay.description}
+                        </p>
+
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            minHeight: '40px',
+                            padding: '0 18px',
+                            borderRadius: '8px',
+                            backgroundColor: '#084a55',
+                            color: '#ffffff',
+                            fontSize: '14px',
+                            fontWeight: 900,
+                            boxShadow: '0 8px 18px rgba(8, 74, 85, 0.2)',
+                          }}
+                        >
+                          {overlay.cta} →
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+
+              return (
+                <div
+                  key={banner}
+                  className="top-visual-slide"
+                  style={{
+                    width: `${100 / BANNERS.length}%`,
+                    flex: `0 0 ${100 / BANNERS.length}%`,
+                    height: '100%',
+                    backgroundColor: '#ffffff',
+                    position: 'relative',
+                  }}
+                >
+                  {link ? (
+                    <Link
+                      to={link}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        height: '100%',
+                        position: 'relative',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      {slideInner}
+                    </Link>
+                  ) : (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        position: 'relative',
+                      }}
+                    >
+                      {slideInner}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {BANNERS.length > 1 && (
