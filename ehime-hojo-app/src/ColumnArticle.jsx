@@ -106,6 +106,14 @@ const formatDate = (value) => {
   return date.toLocaleDateString('ja-JP');
 };
 
+const extractLinks = (html = '') =>
+  Array.from(String(html).matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>/gi))
+    .map((match) => match[1])
+    .filter(Boolean);
+
+const countExternalLinks = (html = '') =>
+  extractLinks(html).filter((href) => /^https?:\/\//i.test(href) && !/ehime-hojokin\.jp/i.test(href)).length;
+
 export default function ColumnArticle() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -329,9 +337,33 @@ export default function ColumnArticle() {
   }
 
   const publishedDate = formatDate(column.published_at || column.created_at);
+  const reviewedDate = formatDate(column.reviewed_at || column.updated_at || column.published_at || column.created_at);
+  const externalSourceCount = countExternalLinks(column.content || '');
   const pageTitle = column.append_site_name === false
     ? column.seo_title || column.title
     : `${column.seo_title || column.title} | 愛媛の補助金ポータル`;
+  const articleJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: column.title,
+    description:
+      column.meta_description ||
+      '愛媛県内の事業者向けに、補助金・助成金に関するお役立ち情報をお届けします。',
+    datePublished: column.published_at || column.created_at || undefined,
+    dateModified: column.reviewed_at || column.updated_at || column.published_at || column.created_at || undefined,
+    author: {
+      '@type': 'Organization',
+      name: 'えひめ補助金ポータル編集部',
+      url: 'https://ehime-hojokin.jp/',
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'えひめ補助金ポータル',
+      url: 'https://ehime-hojokin.jp/',
+    },
+    mainEntityOfPage: `https://ehime-hojokin.jp/column/${column.slug || slug || ''}`,
+    ...(column.thumbnail_url ? { image: column.thumbnail_url } : {}),
+  };
 
   return (
     <div
@@ -369,6 +401,7 @@ export default function ColumnArticle() {
         {column.thumbnail_url && (
           <meta property="og:image" content={column.thumbnail_url} />
         )}
+        <script type="application/ld+json">{JSON.stringify(articleJsonLd)}</script>
       </Helmet>
 
       <Header activePage="columns" setActivePage={handleNavigation} />
@@ -488,11 +521,24 @@ export default function ColumnArticle() {
                   marginBottom: '40px',
                   fontSize: '13px',
                   color: '#64748b',
-                  lineHeight: '1.6',
+                  lineHeight: '1.7',
                 }}
               >
-                掲載している情報は、AIを活用して収集・整理したデータをもとに作成しております。
-                必ず各制度の公式ページにて最新情報をご確認ください。
+                <div style={{ fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
+                  この記事の作成・確認方針
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '18px' }}>
+                  <li>
+                    AIを下書き・整理に活用し、公開前に運営者が公式情報への導線、断定表現、申請前の注意点を確認する方針で掲載しています。
+                  </li>
+                  <li>
+                    補助金・助成金・給付金の条件は変更される場合があります。申請前には必ず公式ページ、自治体窓口、実施機関で最新情報をご確認ください。
+                  </li>
+                  {reviewedDate && <li>最終確認日: {reviewedDate}</li>}
+                  <li>
+                    本文内の外部確認リンク: {externalSourceCount > 0 ? `${externalSourceCount}件` : '本文内に外部リンクがない場合も、申請前には公式情報を確認してください'}
+                  </li>
+                </ul>
               </div>
 
               {sanitizedContent ? (

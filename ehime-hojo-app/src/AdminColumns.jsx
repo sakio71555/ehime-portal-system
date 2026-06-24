@@ -2,6 +2,72 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 
 const FEATURE_CATEGORY = '特集';
+const MIN_PUBLIC_ARTICLE_TEXT_LENGTH = 1200;
+
+const AI_ARTICLE_EDITORIAL_RULES = `
+【AI生成記事の品質ルール】
+- AIは下書き作成に使い、公開前に人間が事実・断定表現・公式確認導線を確認する前提で書いてください。
+- 他サイトや公式ページの要約・言い換えだけで終わらせず、愛媛県内の読者が次に判断できる整理を追加してください。
+- 本文には「誰向けか」「申請前に確認すること」「公式情報の確認先」「注意点」を必ず入れてください。
+- 公式URLが入力素材にある場合は、本文中に公式情報へのリンクを入れてください。
+- 入力素材にない日付・金額・受付状況・採択率・事例・URLを作らないでください。
+- 「必ず採択」「必ずもらえる」「誰でも使える」などの断定表現を避けてください。
+- 文字数稼ぎの一般論、長すぎる前置き、同じ内容の繰り返しは入れないでください。
+- 本文末尾に、制度内容は変更されるため申請前に公式ページや窓口で最新情報を確認する注意書きを入れてください。
+`.trim();
+
+const PUBLISH_QUALITY_CHECKS = [
+  '公式ページ・募集要項・自治体窓口など、確認先が本文内にある',
+  '対象者、申請前チェック、注意点が読者の判断材料になっている',
+  '愛媛県内の事業者・個人向けの文脈が入っている',
+  '日付、金額、受付状況、補助率を断定しすぎていない',
+  '一般論だけの短い記事、要約だけの記事、キーワード差し替え記事になっていない',
+];
+
+const stripHtml = (value) =>
+  String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const extractLinks = (html = '') =>
+  Array.from(String(html).matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>/gi))
+    .map((match) => match[1])
+    .filter(Boolean);
+
+const countExternalOfficialLinks = (html = '') =>
+  extractLinks(html).filter((href) => /^https?:\/\//i.test(href) && !/ehime-hojokin\.jp/i.test(href)).length;
+
+const containsRiskyPromise = (text = '') =>
+  /(必ず|絶対).{0,12}(採択|受給|支給|もらえ|通る|使える)|誰でも.{0,12}(もらえ|使える|受給)/.test(text);
+
+const getColumnQualityWarnings = (column = {}) => {
+  const content = column.content || '';
+  const text = stripHtml(content);
+  const warnings = [];
+
+  if (text.length < MIN_PUBLIC_ARTICLE_TEXT_LENGTH) {
+    warnings.push(`本文が短めです（目安${MIN_PUBLIC_ARTICLE_TEXT_LENGTH}文字以上）。一般論だけの記事に見えないか確認してください。`);
+  }
+
+  if (countExternalOfficialLinks(content) === 0) {
+    warnings.push('公式ページ・募集要項・自治体などへの外部リンクが見つかりません。');
+  }
+
+  if (!/(公式|募集要項|公募要領|自治体|窓口|申請前|最新情報)/.test(text)) {
+    warnings.push('公式情報確認や申請前確認の案内が弱い可能性があります。');
+  }
+
+  if (!/(対象者|対象となる|対象になる|申請|確認|注意|チェック|手順)/.test(text)) {
+    warnings.push('対象者・申請前チェック・注意点など、読者の判断材料が不足している可能性があります。');
+  }
+
+  if (containsRiskyPromise(text)) {
+    warnings.push('「必ず」「誰でも」など、補助金の受給や採択を断定する表現が含まれている可能性があります。');
+  }
+
+  return warnings;
+};
 
 export default function AdminColumns({ initialMode = 'columns' }) {
   const [columns, setColumns] = useState([]);
@@ -74,8 +140,6 @@ export default function AdminColumns({ initialMode = 'columns' }) {
     const instructions = (column.ai_instructions || '').trim();
     const isFeatureArticle = column.category === FEATURE_CATEGORY;
 
-    if (!instructions) return baseTitle;
-
     return `
 【記事タイトル・テーマ】
 ${baseTitle}
@@ -83,15 +147,24 @@ ${baseTitle}
 【記事種別】
 ${isFeatureArticle ? 'トップページの「人気の特集から探す」に表示する特集記事' : '通常コラム記事'}
 
-【必ず反映してほしい文章・素材】
-${instructions}
+${instructions
+  ? `【必ず反映してほしい文章・素材】
+${instructions}`
+  : '【必ず反映してほしい文章・素材】\n未入力。テーマに対して、読者が申請前に判断できる実用情報を中心に構成してください。'}
+
+${AI_ARTICLE_EDITORIAL_RULES}
+
+【本文に必ず入れる見出し】
+- この記事でわかること
+- 対象になる可能性がある人
+- 申請前に確認すること
+- 公式情報の確認先
+- 注意点
 
 【執筆ルール】
-- 上記の素材を無視せず、本文の主要内容として整理してください。
-- 丸写しだけにせず、読者が読みやすい見出し構成にしてください。
-- 制度名・市町村名・注意点はできるだけ残してください。
-- 日付、受付状況、金額などは断定しすぎず、公式情報の確認を促してください。
-- HTML本文は <h2>, <h3>, <p>, <ul>, <li>, <strong> を中心にしてください。
+- 素材を丸写しせず、読者が比較・判断しやすい順番に再構成してください。
+- 制度名・市町村名・注意点・公式URLは、入力素材にある範囲でできるだけ残してください。
+- HTML本文は <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a> を中心にしてください。
 ${isFeatureArticle ? '- category は必ず「特集」にしてください。' : ''}
 `.trim();
   };
@@ -153,12 +226,6 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     return supabase.storage.from('column-images').getPublicUrl(fileName).data.publicUrl;
   };
-
-  const stripHtml = (value) =>
-    String(value || '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
 
   const buildImageOnlyBody = (column) => ({
     imageOnly: true,
@@ -295,7 +362,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     if (
       !window.confirm(
-        `「${editingColumn.title}」というテーマで、記事本文とサムネイル画像をAIで自動生成しますか？\n（※現在入力されている内容は上書きされます。約1分かかります）`
+        `「${editingColumn.title}」というテーマで、公開前確認用のAI下書きとサムネイル画像を生成しますか？\n（※現在入力されている本文は上書きされ、公開ステータスは下書きになります。約1分かかります）`
       )
     ) {
       return;
@@ -323,6 +390,9 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       const articleData = data?.articleData;
       const base64Image = getGeneratedBase64Image(data);
       const imageErrorMessage = getImageErrorMessage(data);
+      const articleQualityWarnings = Array.isArray(data?.articleQualityWarnings)
+        ? data.articleQualityWarnings
+        : [];
 
       if (!articleData) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
@@ -348,15 +418,21 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         thumbnail_text: articleData.thumbnail_text || '',
         thumbnail_url: finalThumbnailUrl,
         tags: articleData.tags || [],
+        is_published: false,
       }));
 
       if (finalThumbnailUrl) {
-        alert('✨ AIによる記事と画像の生成が完了しました！内容を確認して保存してください。');
+        alert(
+          'AI下書きと画像の生成が完了しました。公開前チェックを確認し、必要な公式リンク・注意点を整えてから保存してください。' +
+            (articleQualityWarnings.length
+              ? `\n\n生成結果の確認ポイント:\n${articleQualityWarnings.map((warning) => `・${warning}`).join('\n')}`
+              : '')
+        );
       } else {
         alert(
           `記事は生成できましたが、画像は生成できませんでした。\n` +
             `原因: ${imageErrorMessage || '画像データが返ってきませんでした。'}\n\n` +
-            `記事内容を保存することはできます。画像生成の復旧には auto-column Edge Function の再デプロイと OpenAI画像モデル設定を確認してください。`
+            `記事内容は下書きとして保存できます。公開前に公式リンク・確認日・注意点を必ず確認してください。`
         );
       }
     } catch (err) {
@@ -371,7 +447,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     if (
       !window.confirm(
-        '現在の「公開中」の補助金データから、AIが最適なものを1件選び、コラムと画像を自動生成します。\nよろしいですか？（約1分かかります）'
+        '現在の「公開中」の補助金データから、AIが記事化候補を1件選び、公開前確認用の下書きと画像を生成します。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約1分かかります）'
       )
     ) {
       return;
@@ -379,7 +455,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     setIsProcessing(true);
     setLogs([]);
-    addLog('🚀 AI編集長を起動しました。データ収集を開始します...', 'info');
+    addLog('AI下書き作成を開始しました。公開前確認を前提にデータ収集します...', 'info');
 
     try {
       const { data: existingCols, error: existingError } = await supabase
@@ -414,11 +490,12 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         )
         .join('\n---\n');
 
-      addLog('✍️ AIが最適な補助金を選定し、記事を執筆しています（約30秒〜1分）...', 'info');
+      addLog('AIが記事化候補を選び、公式確認導線を含む下書きを作成しています（約30秒〜1分）...', 'info');
 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           subsidiesText: dataText,
+          extraInstructions: AI_ARTICLE_EDITORIAL_RULES,
         },
       });
 
@@ -428,12 +505,18 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       const articleData = data?.articleData;
       const base64Image = getGeneratedBase64Image(data);
       const imageErrorMessage = getImageErrorMessage(data);
+      const articleQualityWarnings = Array.isArray(data?.articleQualityWarnings)
+        ? data.articleQualityWarnings
+        : [];
 
       if (!articleData) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
       }
 
       addLog(`✨ 執筆完了！タイトル: 「${articleData.title}」`, 'success');
+      if (articleQualityWarnings.length > 0) {
+        addLog(`公開前確認ポイント: ${articleQualityWarnings.join(' / ')}`, 'warning');
+      }
 
       let finalThumbnailUrl = '';
 
@@ -501,6 +584,18 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     if (!supabase) return alert('Supabaseの接続情報が設定されていません。');
 
+    const qualityWarnings = editingColumn.is_published ? getColumnQualityWarnings(editingColumn) : [];
+
+    if (qualityWarnings.length > 0) {
+      const shouldContinue = window.confirm(
+        `公開前品質チェックで確認したい項目があります。\n\n` +
+          qualityWarnings.map((warning) => `・${warning}`).join('\n') +
+          `\n\nこのまま公開状態で保存しますか？\n不安な場合は「キャンセル」して、下書きに戻してから公式リンク・注意点・独自整理を追加してください。`
+      );
+
+      if (!shouldContinue) return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -563,6 +658,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     isFeatureMode ? col.category === FEATURE_CATEGORY : col.category !== FEATURE_CATEGORY
   );
   const missingImageCount = visibleColumns.filter((col) => !col.thumbnail_url).length;
+  const editingQualityWarnings = editingColumn ? getColumnQualityWarnings(editingColumn) : [];
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: 'sans-serif' }}>
@@ -678,24 +774,24 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                   style={{ backgroundColor: isGeneratingTitle ? '#9ca3af' : editingColumn.category === FEATURE_CATEGORY ? '#f59e0b' : '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isGeneratingTitle ? 'not-allowed' : 'pointer', border: 'none', fontSize: '14px', whiteSpace: 'nowrap', transition: 'background-color 0.2s' }}
                 >
                   {isGeneratingTitle
-                    ? '🔄 AI執筆・画像生成中...'
+                    ? 'AI下書き・画像生成中...'
                     : editingColumn.category === FEATURE_CATEGORY
-                      ? '⭐ 特集記事をAI自動執筆'
-                      : '🤖 タイトルからAI自動執筆'}
+                      ? '特集のAI下書きを作成'
+                      : 'タイトルからAI下書きを作成'}
                 </button>
               </div>
 
               <div style={{ backgroundColor: editingColumn.category === FEATURE_CATEGORY ? '#fffbeb' : '#f8fafc', border: editingColumn.category === FEATURE_CATEGORY ? '1px solid #fde68a' : '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
                 <label style={{ display: 'block', fontSize: '13px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>
-                  AIに入れてほしい文章・観点（任意）
+                  AI下書きに入れる素材・確認メモ（推奨）
                 </label>
 
                 <textarea
                   rows="4"
                   placeholder={
                     editingColumn.category === FEATURE_CATEGORY
-                      ? '例：この特集では、愛媛県内の建設業者向けに、設備投資・省エネ・人材確保に使える補助金を中心に紹介してください。長文の素材文章をそのまま貼ってもOKです。'
-                      : '例：初心者向けに、専門用語を避けて説明してください。最後に公式情報確認の注意書きを入れてください。'
+                      ? '例：公式ページURL、対象読者、愛媛県内での確認ポイント、申請前の注意点、入れたい独自見解を貼ってください。'
+                      : '例：公式ページURL、確認日、対象者、注意点、読者が迷いやすい判断ポイントを貼ってください。'
                   }
                   value={editingColumn.ai_instructions || ''}
                   onChange={(e) =>
@@ -708,8 +804,29 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                 />
 
                 <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '12px', lineHeight: 1.6 }}>
-                  ここに入力した内容はAI生成時だけ使います。長文の素材メモも、記事本文に反映されるようAIへまとめて渡します。
+                  公式URL、確認日、一次情報メモ、現場で迷いやすい点を入れるほど、薄い要約記事になりにくくなります。
                 </p>
+              </div>
+
+              <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#166534', marginBottom: '8px' }}>
+                  AI生成記事の公開前チェック
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '20px', color: '#365c45', fontSize: '12px', lineHeight: 1.7 }}>
+                  {PUBLISH_QUALITY_CHECKS.map((check) => (
+                    <li key={check}>{check}</li>
+                  ))}
+                </ul>
+                {editingQualityWarnings.length > 0 && (
+                  <div style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '12px', lineHeight: 1.7 }}>
+                    <strong>現在の本文で確認したい点:</strong>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>
+                      {editingQualityWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '16px' }}>
@@ -798,13 +915,13 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
                 <div>
                   <h2 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 'bold', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {isFeatureMode ? '⭐ 特集記事制作' : '🤖 AI自動コラム生成'}
+                    {isFeatureMode ? '特集記事制作' : 'AI下書きコラム生成'}
                   </h2>
 
                   <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
                     {isFeatureMode
-                      ? 'トップページの「人気の特集から探す」に表示する記事を作成します。公開中の特集記事が最大3件表示されます。'
-                      : '現在公開中の補助金データから、AI編集長が今一番アツい制度を1つ選び出し、SEO最適化されたコラム記事とアイキャッチ画像を全自動で生成します。'}
+                      ? 'トップページの「人気の特集から探す」に表示する記事を作成します。公式情報と独自の整理を入れてから公開してください。'
+                      : '公開中の補助金データからAIが下書きを作成します。公開前に公式情報・独自性・断定表現を確認してください。'}
                   </p>
                 </div>
 
@@ -839,7 +956,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
                   {!isFeatureMode && (
                     <button onClick={handleStartAutoColumn} disabled={isProcessing} style={{ backgroundColor: isProcessing ? '#9ca3af' : '#10b981', color: 'white', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', boxShadow: isProcessing ? 'none' : '0 4px 6px rgba(16, 185, 129, 0.3)', whiteSpace: 'nowrap' }}>
-                      {isProcessing ? '🔄 執筆＆描画中...' : '✒️ AIに今週のおすすめ記事を書かせる'}
+                      {isProcessing ? '下書き＆画像生成中...' : 'AIでおすすめ記事の下書きを作成'}
                     </button>
                   )}
                 </div>
@@ -847,13 +964,13 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
               {isFeatureMode ? (
                 <div style={{ backgroundColor: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '8px', padding: '16px', fontSize: '14px', lineHeight: 1.7 }}>
-                  特集記事はカテゴリが「特集」の公開記事だけがトップページに表示されます。記事作成画面の「AIに入れてほしい文章・観点」に、必ず入れたい導入文・対象業種・紹介したい補助金テーマを書いてからAI生成してください。
+                  特集記事はカテゴリが「特集」の公開記事だけがトップページに表示されます。AI下書きを使う場合も、公式URL・確認日・対象読者・申請前の注意点を素材欄に入れてから作成してください。
                 </div>
               ) : (
                 <div style={{ backgroundColor: '#111827', borderRadius: '8px', padding: '16px', overflowY: 'auto', height: '180px', fontFamily: 'monospace', fontSize: '13px', border: '1px solid #374151' }}>
                   {logs.length === 0 ? (
                     <div style={{ color: '#6b7280', textAlign: 'center', marginTop: '60px' }}>
-                      ボタンを押すと、AI編集長の作業ログがここに表示されます
+                      ボタンを押すと、AI下書き作成の作業ログがここに表示されます
                     </div>
                   ) : (
                     logs.map((log, idx) => (

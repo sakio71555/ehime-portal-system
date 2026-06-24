@@ -34,6 +34,38 @@ const stripHtml = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const extractLinks = (value: string) =>
+  Array.from(String(value || "").matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>/gi))
+    .map((match) => match[1])
+    .filter(Boolean);
+
+const countExternalOfficialLinks = (value: string) =>
+  extractLinks(value).filter((href) => /^https?:\/\//i.test(href) && !/ehime-hojokin\.jp/i.test(href)).length;
+
+const buildArticleQualityWarnings = (articleData: { content?: string }) => {
+  const content = articleData.content || "";
+  const text = stripHtml(content);
+  const warnings: string[] = [];
+
+  if (text.length < 1200) {
+    warnings.push("本文が短めです。一般論だけの記事に見えないか公開前に確認してください。");
+  }
+
+  if (countExternalOfficialLinks(content) === 0) {
+    warnings.push("公式ページ・募集要項・自治体などへの外部リンクが見つかりません。");
+  }
+
+  if (!/(公式|募集要項|公募要領|自治体|窓口|申請前|最新情報)/.test(text)) {
+    warnings.push("公式情報確認や申請前確認の案内が弱い可能性があります。");
+  }
+
+  if (/(必ず|絶対).{0,12}(採択|受給|支給|もらえ|通る|使える)|誰でも.{0,12}(もらえ|使える|受給)/.test(text)) {
+    warnings.push("補助金の受給や採択を断定する表現が含まれている可能性があります。");
+  }
+
+  return warnings;
+};
+
 const toText = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
@@ -359,18 +391,32 @@ serve(async (req: Request) => {
     }
 
     const systemPrompt = `
-あなたは、愛媛県内の中小企業・個人事業主向けに補助金・助成金情報をわかりやすく解説するWebメディアの編集者です。
+あなたは、愛媛県内の中小企業・個人事業主向けに補助金・助成金情報をわかりやすく整理するWebメディアの編集者です。
+AIの役割は公開前の下書き作成です。公開前に人間が公式情報、断定表現、独自性を確認する前提で、確認しやすい記事を作ってください。
 
 【重要ルール】
 - 読者は愛媛県内の事業者です。
+- 公式ページや入力データの要約・言い換えだけで終わらせず、読者が次に判断できる整理を加えてください。
+- 文字数稼ぎの一般論、長い前置き、同じ内容の繰り返し、キーワードだけを差し替えた文章は禁止です。
+- 入力データにない日付、受付状況、金額、補助率、採択率、企業名、成功事例、URLを作らないでください。
+- 公式URLが入力データにある場合は、本文中に必ず公式情報へのリンクを入れてください。
+- 公式URLがない場合は、架空URLを作らず「公式ページや自治体窓口で確認」と書いてください。
 - 実在企業の成功事例を断定しないこと。
 - 「必ず採択される」「必ず受給できる」などの断定表現を避けること。
 - 初心者にもわかりやすい日本語にすること。
 - 本文はHTMLで出力すること。
-- 使用してよいHTMLタグは <h2>, <h3>, <p>, <ul>, <li>, <strong> のみ。
+- 使用してよいHTMLタグは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a> のみ。
 - 本文の最後に、必ず公式情報確認を促す注意書きを入れること。
 - 画像プロンプトには「文字を入れない」指定を含めること。
 - 追加指示がある場合は、法令・事実・安全性に反しない範囲で必ず本文に反映すること。
+
+【本文に必ず入れる内容】
+- この記事でわかること
+- 対象になる可能性がある人
+- 申請前に確認すること
+- 公式情報の確認先
+- 注意点
+- 愛媛県内の読者が次に取る行動
 
 【出力JSON】
 次のキーだけを持つJSONを返してください。
@@ -402,16 +448,17 @@ ${extraInstructions}
       ? `
 以下は、現在公開中の補助金データです。
 
-この中から、愛媛県内の事業者にとって記事化する価値が高い制度を1つ選び、コラム記事を作成してください。
+この中から、愛媛県内の事業者にとって記事化する価値が高く、公式URLや申請前の判断材料を本文に入れやすい制度を1つ選び、公開前確認用のコラム下書きを作成してください。
 
 選んだ制度の ID を subsidy_id に必ず入れてください。
+公式URLがある制度を優先してください。公式URLがない制度を選ぶ場合は、本文内で公式確認先が未確認であることを明記してください。
 
 【補助金データ】
 ${subsidiesText}
 ${extraInstructionBlock}
 `
       : `
-以下のテーマで、補助金・助成金に関するコラム記事を作成してください。
+以下のテーマで、補助金・助成金に関する公開前確認用のコラム下書きを作成してください。
 
 【テーマ】
 ${title}
@@ -419,7 +466,7 @@ ${title}
 ${articleType === "feature"
   ? `
 この記事はトップページの「人気の特集から探す」に表示する特集記事です。
-通常のコラムよりも、対象読者・探せる制度・次に取る行動がすぐ分かる構成にしてください。
+通常のコラムよりも、対象読者・探せる制度・次に取る行動・公式確認先がすぐ分かる構成にしてください。
 category は必ず「特集」にしてください。
 `
   : ""}
@@ -543,6 +590,7 @@ ${extraInstructionBlock}
       articleData.category = preferredCategory;
     }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
+    const articleQualityWarnings = buildArticleQualityWarnings(articleData);
 
     const { base64Image, imageError, imageUrl, imageDebug } = await generateImage({
       openAiKey,
@@ -558,6 +606,7 @@ ${extraInstructionBlock}
 
     return jsonResponse({
       articleData,
+      articleQualityWarnings,
       base64Image,
       imageError,
       imageUrl,
