@@ -23,6 +23,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
   const [regeneratingImageId, setRegeneratingImageId] = useState(null);
   const [isBackfillingImages, setIsBackfillingImages] = useState(false);
   const [isRunningQualityReview, setIsRunningQualityReview] = useState(false);
+  const [isRepairingArticle, setIsRepairingArticle] = useState(false);
 
   const fetchColumns = useCallback(async () => {
     if (!supabase) {
@@ -161,19 +162,28 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     is_published: false,
   });
 
-  const buildQualityReviewForGeneratedArticle = (data, articleData, fallbackColumn = {}, articleType = 'column') =>
-    mergeColumnQualityReview(
-      data?.articleQualityReview || articleData?.quality_review,
-      buildGeneratedColumnDraft(articleData, fallbackColumn),
-      { articleType }
-    );
+  const buildQualityReviewForGeneratedArticle = (data, articleData, fallbackColumn = {}, articleType = 'column') => {
+    const draft = {
+      ...buildGeneratedColumnDraft(articleData, fallbackColumn),
+      quality_review: data?.articleQualityReview || articleData?.quality_review,
+    };
+
+    return mergeColumnQualityReview(data?.articleQualityReview || articleData?.quality_review, draft, {
+      articleType,
+      sourceFacts: data?.sourceFacts || data?.articleQualityReview?.sourceFacts || articleData?.sourceFacts,
+      sourceText: data?.sourceText || fallbackColumn.ai_instructions || '',
+    });
+  };
 
   const formatQualityReviewForAlert = (review) => {
     if (!review) return '';
 
     const lines = [
       `品質スコア: ${review.qualityScore}/100（${review.grade}）`,
+      `公式情報充足率: ${review.sourceCoverageScore ?? 0}/100`,
+      `事実根拠スコア: ${review.factualGroundingScore ?? 0}/100`,
       review.shouldRegenerate ? '再生成推奨: はい' : '再生成推奨: いいえ',
+      review.publishAllowed ? '公開判定: 公開可能' : '公開判定: 公開不可または要確認',
     ];
 
     if (review.fatalIssues?.length) {
@@ -186,6 +196,14 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     if (review.scoreCapsApplied?.length) {
       lines.push('', 'スコア上限:', ...review.scoreCapsApplied.map((cap) => `・${cap}`));
+    }
+
+    if (review.unsupportedClaims?.length) {
+      lines.push('', '根拠不明の主張:', ...review.unsupportedClaims.map((claim) => `・${claim}`));
+    }
+
+    if (review.suggestedTitles?.length) {
+      lines.push('', '安全なタイトル案:', ...review.suggestedTitles.slice(0, 3).map((item) => `・${item}`));
     }
 
     if (review.improvementSuggestions?.length) {
@@ -382,6 +400,8 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           title: generationPrompt,
+          requestedTitle: editingColumn.title || '',
+          sourceText: editingColumn.ai_instructions || '',
           articleType: isFeatureArticle ? 'feature' : 'column',
           category: editingColumn.category || '',
           // 追加指示は title 側にも埋め込む。未デプロイの旧Edge Functionでも反映されるようにするため。
@@ -451,6 +471,11 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     setIsRunningQualityReview(true);
 
     try {
+      const articleType = editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column';
+      const ruleBasedReview = reviewColumnQuality(editingColumn, {
+        articleType,
+        sourceText: editingColumn.ai_instructions || '',
+      });
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           qualityReviewOnly: true,
@@ -460,7 +485,10 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
           seo_title: editingColumn.seo_title || '',
           content: editingColumn.content || '',
           category: editingColumn.category || '',
-          articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column',
+          articleType,
+          sourceText: editingColumn.ai_instructions || '',
+          sourceFacts: ruleBasedReview.sourceFacts,
+          ruleBasedReview,
         },
       });
 
@@ -468,7 +496,9 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       if (data?.error && !data?.articleQualityReview) throw new Error(data.error);
 
       const nextQualityReview = mergeColumnQualityReview(data?.articleQualityReview, editingColumn, {
-        articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column',
+        articleType,
+        sourceFacts: data?.articleQualityReview?.sourceFacts || ruleBasedReview.sourceFacts,
+        sourceText: editingColumn.ai_instructions || '',
       });
 
       setEditingColumn((prev) => ({
@@ -485,6 +515,79 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       alert(`API品質レビューエラー: ${err.message}`);
     } finally {
       setIsRunningQualityReview(false);
+    }
+  };
+
+  const handleRepairArticleFromReview = async () => {
+    if (!supabase) return alert('Supabaseの接続情報が設定されていません。');
+    if (!editingColumn?.content) return alert('修正する本文がありません。');
+
+    const articleType = editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column';
+    const currentReview = mergeColumnQualityReview(editingColumn.quality_review, editingColumn, {
+      articleType,
+      sourceText: editingColumn.ai_instructions || '',
+    });
+    const currentIteration = Number(currentReview.repairIterations || 0);
+
+    if (currentIteration >= 2) {
+      return alert('自動修正は最大2回までです。これ以上は人間確認で修正してください。');
+    }
+
+    const shouldRun = window.confirm(
+      'OpenAI APIを使って、公開前チェックの指摘を反映した修正案を1回生成します。\nAPI利用料が発生する可能性があります。\n公式ファクトにない情報は追加しません。\n実行しますか？'
+    );
+
+    if (!shouldRun) return;
+
+    setIsRepairingArticle(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('auto-column', {
+        body: {
+          repairArticleOnly: true,
+          confirmUsePaidApi: true,
+          originalTitle: editingColumn.title || '',
+          originalBody: editingColumn.content || '',
+          seo_title: editingColumn.seo_title || '',
+          meta_description: editingColumn.meta_description || '',
+          category: editingColumn.category || '',
+          tags: editingColumn.tags || [],
+          articleType,
+          sourceText: editingColumn.ai_instructions || '',
+          sourceFacts: currentReview.sourceFacts,
+          ruleBasedReview: currentReview,
+          repairIteration: currentIteration + 1,
+        },
+      });
+
+      if (error) throw new Error(`サーバー通信エラー: ${error.message}`);
+      if (data?.error) throw new Error(data.error);
+
+      const articleData = data?.articleData;
+      if (!articleData) throw new Error('修正済み記事データが返ってきませんでした。');
+
+      const nextQualityReview = buildQualityReviewForGeneratedArticle(
+        data,
+        articleData,
+        editingColumn,
+        articleType
+      );
+
+      setEditingColumn((prev) => ({
+        ...prev,
+        ...buildGeneratedColumnDraft(articleData, prev),
+        thumbnail_url: prev.thumbnail_url,
+        quality_review: {
+          ...nextQualityReview,
+          repairIterations: currentIteration + 1,
+        },
+      }));
+
+      alert(`修正生成が完了しました。\n\n${formatQualityReviewForAlert(nextQualityReview)}`);
+    } catch (err) {
+      alert(`修正生成エラー: ${err.message}`);
+    } finally {
+      setIsRepairingArticle(false);
     }
   };
 
@@ -638,22 +741,37 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     const qualityReview = reviewColumnQuality(editingColumn, {
       articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column',
+      sourceText: editingColumn.ai_instructions || '',
     });
 
-    if (editingColumn.is_published && qualityReview.fatalIssues.length > 0) {
+    const hardBlockReasons = [
+      ...(qualityReview.fatalIssues || []),
+      ...(qualityReview.unsupportedClaims || []).map((claim) => `根拠不明の主張: ${claim}`),
+      ...(qualityReview.contradictoryClaims || []).map((claim) => `公式情報と矛盾する可能性: ${claim}`),
+      ...(qualityReview.titleNeedsRewrite ? ['タイトル変更推奨が出ています。安全なタイトル案に修正してください。'] : []),
+    ];
+
+    if (editingColumn.is_published && hardBlockReasons.length > 0) {
       alert(
-        `致命的NGがあるため、このまま公開状態では保存できません。\n\n` +
-          qualityReview.fatalIssues.map((issue) => `・${issue}`).join('\n') +
+        `公開不可の品質問題があるため、このまま公開状態では保存できません。\n\n` +
+          hardBlockReasons.map((issue) => `・${issue}`).join('\n') +
           `\n\n下書きに戻すか、本文を修正してから保存してください。`
       );
       return;
     }
 
-    if (editingColumn.is_published && (qualityReview.warnings.length > 0 || qualityReview.qualityScore < 90)) {
+    const strongWarnings = [
+      ...(qualityReview.warnings || []),
+      ...(qualityReview.missingFacts || []).map((field) => `公式ファクト不足: ${field}`),
+      ...(qualityReview.llmReview?.usedApi ? [] : ['API品質レビューが未実行です。']),
+      ...(qualityReview.publishAllowed ? [] : ['公開可能判定ではありません。']),
+    ];
+
+    if (editingColumn.is_published && (strongWarnings.length > 0 || qualityReview.qualityScore < 90)) {
       const shouldContinue = window.confirm(
         `公開前品質チェックで確認したい項目があります。\n\n` +
           `品質スコア: ${qualityReview.qualityScore}/100（${qualityReview.grade}）\n\n` +
-          qualityReview.warnings.map((warning) => `・${warning}`).join('\n') +
+          strongWarnings.map((warning) => `・${warning}`).join('\n') +
           `\n\nこのまま公開状態で保存しますか？\n不安な場合は「キャンセル」して、下書きに戻してから公式リンク・注意点・独自整理を追加してください。`
       );
 
@@ -903,6 +1021,45 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 	                            padding: '6px 10px',
 	                            borderRadius: '999px',
 	                            backgroundColor: '#ffffff',
+	                            border: '1px solid #cbd5e1',
+	                            color: '#475569',
+	                            fontSize: '12px',
+	                            fontWeight: 'bold',
+	                          }}
+	                        >
+	                          種別 {editingQualityReview.articleTypeLabel || editingQualityReview.articleType || '未判定'}
+	                        </div>
+	                        <div
+	                          style={{
+	                            padding: '6px 10px',
+	                            borderRadius: '999px',
+	                            backgroundColor: '#ffffff',
+	                            border: '1px solid #cbd5e1',
+	                            color: '#475569',
+	                            fontSize: '12px',
+	                            fontWeight: 'bold',
+	                          }}
+	                        >
+	                          公式 {editingQualityReview.sourceCoverageScore ?? 0}/100
+	                        </div>
+	                        <div
+	                          style={{
+	                            padding: '6px 10px',
+	                            borderRadius: '999px',
+	                            backgroundColor: '#ffffff',
+	                            border: '1px solid #cbd5e1',
+	                            color: '#475569',
+	                            fontSize: '12px',
+	                            fontWeight: 'bold',
+	                          }}
+	                        >
+	                          根拠 {editingQualityReview.factualGroundingScore ?? 0}/100
+	                        </div>
+	                        <div
+	                          style={{
+	                            padding: '6px 10px',
+	                            borderRadius: '999px',
+	                            backgroundColor: '#ffffff',
 	                            border: `1px solid ${getQualityReviewColor(editingQualityReview)}`,
 	                            color: getQualityReviewColor(editingQualityReview),
 	                            fontSize: '12px',
@@ -926,6 +1083,19 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 	                        >
 	                          {editingQualityReview.llmReview?.usedApi ? 'APIレビュー実行済み' : 'APIレビュー未実行'}
 	                        </div>
+	                        <div
+	                          style={{
+	                            padding: '6px 10px',
+	                            borderRadius: '999px',
+	                            backgroundColor: editingQualityReview.publishAllowed ? '#ecfdf5' : '#fef2f2',
+	                            border: `1px solid ${editingQualityReview.publishAllowed ? '#bbf7d0' : '#fecaca'}`,
+	                            color: editingQualityReview.publishAllowed ? '#047857' : '#b91c1c',
+	                            fontSize: '12px',
+	                            fontWeight: 'bold',
+	                          }}
+	                        >
+	                          {editingQualityReview.publishAllowed ? '公開可能' : '公開不可/要確認'}
+	                        </div>
 	                      </>
 	                    )}
 	                    <button
@@ -944,6 +1114,23 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 	                      }}
 	                    >
 	                      {isRunningQualityReview ? 'APIレビュー中...' : 'API品質レビュー'}
+	                    </button>
+	                    <button
+	                      type="button"
+	                      onClick={handleRepairArticleFromReview}
+	                      disabled={isRepairingArticle}
+	                      style={{
+	                        backgroundColor: isRepairingArticle ? '#e5e7eb' : '#ffffff',
+	                        color: isRepairingArticle ? '#6b7280' : '#0f766e',
+	                        border: '1px solid #99f6e4',
+	                        borderRadius: '999px',
+	                        padding: '7px 12px',
+	                        fontSize: '12px',
+	                        fontWeight: 'bold',
+	                        cursor: isRepairingArticle ? 'not-allowed' : 'pointer',
+	                      }}
+	                    >
+	                      {isRepairingArticle ? '修正生成中...' : '指摘を反映して修正生成'}
 	                    </button>
 	                  </div>
 	                </div>
@@ -967,6 +1154,53 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 	                          <li key={comment}>{comment}</li>
 	                        ))}
 	                      </ul>
+	                    )}
+	                  </div>
+	                )}
+	                {(editingQualityReview?.missingFacts?.length > 0 || editingQualityReview?.titleNeedsRewrite) && (
+	                  <div style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '12px', lineHeight: 1.7 }}>
+	                    <strong>公式ファクト・タイトル安全化:</strong>
+	                    {editingQualityReview?.missingFacts?.length > 0 && (
+	                      <div style={{ marginTop: '6px' }}>
+	                        不足: {editingQualityReview.missingFacts.join('、')}
+	                      </div>
+	                    )}
+	                    {editingQualityReview?.titleNeedsRewrite && (
+	                      <div style={{ marginTop: '6px' }}>
+	                        タイトル変更推奨: はい
+	                        {editingQualityReview.suggestedTitles?.length > 0 && (
+	                          <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>
+	                            {editingQualityReview.suggestedTitles.slice(0, 3).map((titleOption) => (
+	                              <li key={titleOption}>{titleOption}</li>
+	                            ))}
+	                          </ul>
+	                        )}
+	                      </div>
+	                    )}
+	                  </div>
+	                )}
+	                {(editingQualityReview?.unsupportedClaims?.length > 0 || editingQualityReview?.contradictoryClaims?.length > 0) && (
+	                  <div style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '12px', lineHeight: 1.7 }}>
+	                    <strong>事実主張の照合結果:</strong>
+	                    {editingQualityReview.unsupportedClaims?.length > 0 && (
+	                      <>
+	                        <div style={{ marginTop: '6px', fontWeight: 'bold' }}>unsupported</div>
+	                        <ul style={{ margin: '4px 0 0', paddingLeft: '18px' }}>
+	                          {editingQualityReview.unsupportedClaims.map((claim) => (
+	                            <li key={claim}>{claim}</li>
+	                          ))}
+	                        </ul>
+	                      </>
+	                    )}
+	                    {editingQualityReview.contradictoryClaims?.length > 0 && (
+	                      <>
+	                        <div style={{ marginTop: '6px', fontWeight: 'bold' }}>contradictory</div>
+	                        <ul style={{ margin: '4px 0 0', paddingLeft: '18px' }}>
+	                          {editingQualityReview.contradictoryClaims.map((claim) => (
+	                            <li key={claim}>{claim}</li>
+	                          ))}
+	                        </ul>
+	                      </>
 	                    )}
 	                  </div>
 	                )}

@@ -58,9 +58,10 @@ export const COLUMN_FATAL_ISSUE_RULES = [
   '愛媛県・市町村・地域事業者の視点がない',
   '管理用メモが公開本文に出ている',
   '公式情報で確認していない数字を確定情報のように書いている',
-  '申請前に契約・発注・購入・着手しない注意がない',
+  '契約・発注・購入・着手が可能になる時点について、制度ごとの確認を促していない',
   '公募名・制度名を具体的に出しているのに、実施機関・公募期間・締切・公式URLが不足している',
   'FS調査事業の記事なのに、本文が設備導入や購入中心の説明になっている',
+  '本文中の金額・日付・対象者・対象経費・対象外経費に、公式ファクトで裏付けられない具体的主張がある',
 ];
 
 export const COLUMN_GENERATION_PROMPT_RULES = `
@@ -80,11 +81,13 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 - CTAを入れてください。
 - 関連する内部リンクを本文に自然に入れてください。例: /search?keyword=設備投資, /simulator, /experts, /feature/startup-digital
 - 公式情報の確認を促してください。
-- 申請前に契約・発注・購入・着手しない注意を書いてください。
+- 契約・発注・購入・着手が可能になる時点は制度ごとに異なるため、公式情報に基づいて表現してください。公式情報で確認できない場合は「交付決定前などに発生した経費が対象外になる場合があるため、公募要領と実施機関へ確認してください」と安全に書いてください。
 - 対象者、対象経費、対象外になりやすい経費を書いてください。
 - 愛媛県内の事業者、個人事業主、市町村、商工会議所、商工会、支援機関の視点を入れてください。
 - 「必ず対象」「必ずもらえる」「必ず使える」など断定しないでください。
 - 管理用メモ、品質スコア、自己採点、fatalIssues、warnings、shouldRegenerate などを公開本文に入れないでください。
+- suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを推測で補完しないでください。
+- 情報が不足する場合は missingFacts として管理用データに返し、本文では断定しないでください。
 
 【本文にできるだけ入れる要素】
 1. 冒頭の結論
@@ -121,11 +124,14 @@ ${COLUMN_FATAL_ISSUE_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\
 - fatalIssues が1つでもある場合は shouldRegenerate true、shouldHumanReview true
 - scoreCapsApplied は必ず配列で返してください。点数上限ルールに該当した場合は「39点上限: 理由」のように記録してください。
 - 本文が1,500文字未満なら致命的NGで49点上限、3,000文字未満なら79点上限です。
-- 表なしは59点上限、内部リンクなしは59点上限、公式確認導線なしは49点上限、申請前に契約・発注・購入・着手しない注意なしは69点上限です。
+- 表なしは59点上限、内部リンクなしは59点上限、公式確認導線なしは49点上限、契約・発注・購入・着手が可能になる時点の注意なしは69点上限です。
 - タイトルで補助率・上限額・金額・令和年度・2026年・第○次公募・締切などを約束したのに本文に対応する具体情報がなければ39点上限です。
 - 具体的な公募名・制度名を出す場合は、年度、回次、実施機関、開始日、締切、補助率、上限額、対象者、対象事業、対象経費、対象外経費、申請前注意、公式URL、確認日を表で確認できるようにしてください。不明な情報は断定せず、タイトルを弱めてください。
 - FS調査事業の記事で本文が設備導入・購入中心になっている場合は49点上限です。
-- 90点以上は、3,000文字以上、タイトルと本文の一致、対象者・対象経費・対象外、申請前注意、公式確認、愛媛文脈、表、チェックリスト、内部リンク、CTA、管理用メモなし、未確認数字の断定なしをすべて満たす場合だけです。
+- unsupportedClaims または contradictoryClaims がある場合は公開不可です。
+- sourceCoverageScore、factualGroundingScore、contentQualityScore、finalScore を分けて返してください。
+- titleNeedsRewrite と suggestedTitles を返してください。
+- 90点以上は、3,000文字以上、タイトルと本文の一致、対象者・対象経費・対象外、契約・発注・購入・着手時期の注意、公式確認、愛媛文脈、表、チェックリスト、内部リンク、CTA、管理用メモなし、未確認数字の断定なしをすべて満たす場合だけです。
 - llmReview は別の任意APIレビュー用です。記事生成時は enabled:false、usedApi:false、semanticScore:0、各コメントは「APIレビュー未実行」にしてください。
 - 品質レビューは管理画面用です。公開本文には混ぜないでください。
 `.trim();
@@ -140,6 +146,28 @@ export const PUBLISH_QUALITY_CHECKS = [
   '申請前に契約・発注・購入・着手しない注意がある',
   '管理用メモや自己採点が公開本文に混ざっていない',
 ];
+
+export const COLUMN_ARTICLE_TYPES = [
+  'single_program',
+  'feature',
+  'feasibility_study',
+  'equipment',
+  'digital',
+  'employment',
+  'research',
+  'marketing',
+];
+
+const ARTICLE_TYPE_LABELS = {
+  single_program: '個別制度記事',
+  feature: '特集記事',
+  feasibility_study: 'FS・実現可能性調査',
+  equipment: '設備投資',
+  digital: 'IT・デジタル化',
+  employment: '雇用・人材',
+  research: '研究開発',
+  marketing: '販路開拓',
+};
 
 const INTERNAL_DOMAIN_RE = /ehime-hojokin\.jp/i;
 const YEAR_PROMISE_RE = /(令和\s*\d+\s*年度|20\d{2}\s*年|2026\s*年|2027\s*年)/;
@@ -169,12 +197,30 @@ const MANAGEMENT_MEMO_RE =
 const EHIME_CONTEXT_RE =
   /(愛媛県|県内|松山市|今治市|宇和島市|新居浜市|西条市|大洲市|西予市|八幡浜市|四国中央市|商工会議所|商工会|地域事業者|えひめ補助金ポータル)/;
 const PRE_CONTRACT_RE =
-  /(申請前|交付決定前).{0,40}(契約|発注|購入|着手)|(?:契約|発注|購入|着手).{0,40}(申請前|交付決定前)/;
+  /(申請前|交付申請前|交付決定前|事前着手届).{0,60}(契約|発注|購入|着手)|(?:契約|発注|購入|着手).{0,60}(申請前|交付申請前|交付決定前|事前着手届|制度ごと|公募要領|実施機関|確認)/;
 const TARGET_RE = /(対象者|対象になる|対象となる|対象の方|事業者|個人事業主|中小企業|法人|市町村|県内事業者)/;
 const EXPENSE_RE = /(対象経費|補助対象経費|経費|設備|購入|改修|委託|広告|人件費|旅費|受講費|システム|ソフトウェア|機器)/;
 const EXCLUDED_EXPENSE_RE = /(対象外|対象にならない|対象外経費|注意が必要な経費|補助対象外)/;
 const CTA_RE = /(相談|診断|探す|確認する|問い合わせ|専門家|シミュレーター|次のステップ|公式ページで確認|補助金を探す|申請前に確認)/;
 const PROJECT_RE = /(対象事業|補助対象事業|取り組み|取組|事業内容|対象となる事業|支援対象事業)/;
+const START_TIMING_RE =
+  /(契約|発注|購入|着手).{0,60}(制度ごと|交付決定前|事前着手|公募要領|実施機関|確認)|(?:交付決定前|事前着手届|公募要領).{0,60}(契約|発注|購入|着手|経費)/;
+const INDUSTRY_UNSUPPORTED_RE = /(建設業、?製造業、?サービス業|建設業・製造業・サービス業)/;
+const EXPENSE_UNSUPPORTED_RE = /(新規設備導入費|研修費|調査費)/;
+const EXCLUDED_UNSUPPORTED_RE = /(中古品|人件費).{0,24}(対象外|補助対象外|対象にならない)|(?:対象外|補助対象外).{0,24}(中古品|人件費)/;
+const CLAIM_NUMBER_RE =
+  /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|申請締切|締切|公募期間|受付期間|令和\s*\d+\s*年度|20\d{2}\s*年).{0,40}?(%|％|円|万円|千円|令和\s*\d+\s*年|20\d{2}[/-]\d{1,2}|20\d{2}年\d{1,2}月|\d{1,3}\s*\/\s*\d{1,3}|\d+\s*割)/g;
+
+const SOURCE_FACT_REQUIRED_BY_TYPE = {
+  single_program: ['officialName', 'administeringBody', 'officialSources', 'eligibleApplicants', 'eligibleExpenses'],
+  feature: ['officialSources'],
+  feasibility_study: ['officialSources', 'eligibleProjects'],
+  equipment: ['officialSources', 'eligibleExpenses'],
+  digital: ['officialSources', 'eligibleExpenses'],
+  employment: ['officialSources', 'eligibleApplicants'],
+  research: ['officialSources', 'eligibleProjects'],
+  marketing: ['officialSources', 'eligibleProjects'],
+};
 
 export const stripHtmlToText = (value = '') =>
   String(value)
@@ -219,6 +265,370 @@ const extractCapValue = (cap) => {
   return match ? normalizeScore(match[1]) : 100;
 };
 
+const splitFactList = (value = '') =>
+  uniqueList(String(value || '').split(/[、,\n／/・|]+/).map((item) => item.replace(/^(対象|経費|概要|上限|締切)\s*[:：]?/, '')));
+
+const textValue = (value = '') => String(value || '').trim();
+
+const extractLabeledValue = (text = '', label = '') => {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(text || '').match(new RegExp(`${escapedLabel}\\s*[:：]\\s*([^|\\n]+)`, 'i'));
+  return match ? match[1].trim() : '';
+};
+
+const extractUrlsFromText = (text = '') =>
+  uniqueList(String(text || '').match(/https?:\/\/[^\s<>"')]+/g) || []);
+
+const normalizeSource = (source = {}, index = 0) => ({
+  id: textValue(source.id) || `source-${index + 1}`,
+  label: textValue(source.label) || textValue(source.url) || `公式情報 ${index + 1}`,
+  url: textValue(source.url),
+  checkedAt: textValue(source.checkedAt),
+  evidence: textValue(source.evidence),
+});
+
+const normalizePreStartRule = (value = {}) => ({
+  confirmed: Boolean(value?.confirmed),
+  allowedFrom: textValue(value?.allowedFrom),
+  safeDescription: textValue(value?.safeDescription),
+  sourceId: textValue(value?.sourceId),
+});
+
+export const createEmptySourceFacts = (articleType = 'feature') => ({
+  articleType,
+  officialName: '',
+  fiscalYear: '',
+  applicationRound: '',
+  administeringBody: '',
+  supervisingBody: '',
+  applicationStart: '',
+  applicationDeadline: '',
+  subsidyRate: '',
+  subsidyCap: '',
+  eligibleApplicants: [],
+  eligibleProjects: [],
+  eligibleExpenses: [],
+  ineligibleExpenses: [],
+  applicationMethods: [],
+  projectPeriod: '',
+  preStartRule: {
+    confirmed: false,
+    allowedFrom: '',
+    safeDescription: '',
+    sourceId: '',
+  },
+  officialSources: [],
+  unknownFields: [],
+});
+
+export const normalizeColumnArticleType = (value = '', context = {}) => {
+  const raw = String(value || '').trim();
+  if (COLUMN_ARTICLE_TYPES.includes(raw)) return raw;
+  if (raw === 'column') return normalizeColumnArticleType('', context);
+
+  const text = `${context.title || ''} ${context.content || ''} ${context.category || ''}`;
+  if (context.category === '特集' || raw === 'feature') return 'feature';
+  if (FS_TITLE_RE.test(text)) return 'feasibility_study';
+  if (/(設備投資|設備導入|省エネ|太陽光|蓄電池|機械)/.test(text)) return 'equipment';
+  if (/(IT|DX|デジタル|システム|ソフトウェア|AI|クラウド)/i.test(text)) return 'digital';
+  if (/(雇用|採用|人材|賃上げ|研修|リスキリング)/.test(text)) return 'employment';
+  if (/(研究|開発|実証|試作|技術開発)/.test(text)) return 'research';
+  if (/(販路|販売促進|展示会|広告|PR|マーケティング|売上)/.test(text)) return 'marketing';
+  if (PUBLIC_OFFERING_TITLE_RE.test(text) && !GENERIC_TITLE_RE.test(text)) return 'single_program';
+  return 'feature';
+};
+
+const normalizeSourceFacts = (sourceFacts = {}) => {
+  const articleType = normalizeColumnArticleType(sourceFacts.articleType || sourceFacts.article_type || 'feature');
+  return {
+    ...createEmptySourceFacts(articleType),
+    ...sourceFacts,
+    articleType,
+    officialName: textValue(sourceFacts.officialName || sourceFacts.official_name),
+    fiscalYear: textValue(sourceFacts.fiscalYear || sourceFacts.fiscal_year),
+    applicationRound: textValue(sourceFacts.applicationRound || sourceFacts.application_round),
+    administeringBody: textValue(sourceFacts.administeringBody || sourceFacts.administering_body),
+    supervisingBody: textValue(sourceFacts.supervisingBody || sourceFacts.supervising_body),
+    applicationStart: textValue(sourceFacts.applicationStart || sourceFacts.application_start),
+    applicationDeadline: textValue(sourceFacts.applicationDeadline || sourceFacts.application_deadline),
+    subsidyRate: textValue(sourceFacts.subsidyRate || sourceFacts.subsidy_rate),
+    subsidyCap: textValue(sourceFacts.subsidyCap || sourceFacts.subsidy_cap),
+    eligibleApplicants: uniqueList(sourceFacts.eligibleApplicants || sourceFacts.eligible_applicants || []),
+    eligibleProjects: uniqueList(sourceFacts.eligibleProjects || sourceFacts.eligible_projects || []),
+    eligibleExpenses: uniqueList(sourceFacts.eligibleExpenses || sourceFacts.eligible_expenses || []),
+    ineligibleExpenses: uniqueList(sourceFacts.ineligibleExpenses || sourceFacts.ineligible_expenses || []),
+    applicationMethods: uniqueList(sourceFacts.applicationMethods || sourceFacts.application_methods || []),
+    projectPeriod: textValue(sourceFacts.projectPeriod || sourceFacts.project_period),
+    preStartRule: normalizePreStartRule(sourceFacts.preStartRule || sourceFacts.pre_start_rule || {}),
+    officialSources: Array.isArray(sourceFacts.officialSources || sourceFacts.official_sources)
+      ? (sourceFacts.officialSources || sourceFacts.official_sources).map(normalizeSource)
+      : [],
+    unknownFields: uniqueList(sourceFacts.unknownFields || sourceFacts.unknown_fields || []),
+  };
+};
+
+export const buildColumnSourceFacts = (input = {}) => {
+  const sourceText = stripHtmlToText(
+    [
+      input.sourceText,
+      input.subsidiesText,
+      input.aiInstructions,
+      input.officialMemo,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
+  const contentText = stripHtmlToText(input.content || '');
+  const title = textValue(input.title || input.seo_title);
+  const existingFacts = normalizeSourceFacts(input.sourceFacts || input.source_facts || {});
+  const blocks = String(input.subsidiesText || input.sourceText || '')
+    .split(/\n---\n/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const selectedBlock =
+    blocks.find((block) => input.subsidyId && block.includes(`ID:${input.subsidyId}`)) ||
+    blocks[0] ||
+    sourceText;
+  const urls = extractUrlsFromText(sourceText || selectedBlock);
+  const officialUrlFromLabel = extractLabeledValue(selectedBlock, '公式URL');
+  const officialUrl =
+    officialUrlFromLabel && officialUrlFromLabel !== 'なし'
+      ? officialUrlFromLabel
+      : urls.find((url) => !INTERNAL_DOMAIN_RE.test(url)) || '';
+  const sourceEvidence = stripHtmlToText(selectedBlock || sourceText).replace(officialUrl, '').trim();
+  const hasSourceEvidence =
+    sourceEvidence.length >= 24 &&
+    /(タイトル|機関|実施機関|概要|対象|経費|上限|締切|募集|公募|確認日|交付要綱|公募要領)/.test(sourceEvidence);
+  const officialSources = [...existingFacts.officialSources];
+
+  if (officialUrl && !officialSources.some((source) => source.url === officialUrl)) {
+    officialSources.push({
+      id: 'source-1',
+      label: extractLabeledValue(selectedBlock, 'タイトル') || '公式情報',
+      url: officialUrl,
+      checkedAt: extractLabeledValue(sourceText, '確認日'),
+      evidence: hasSourceEvidence ? sourceEvidence.slice(0, 800) : '',
+    });
+  }
+
+  const nextFacts = {
+    ...existingFacts,
+    officialName: existingFacts.officialName || extractLabeledValue(selectedBlock, 'タイトル'),
+    administeringBody: existingFacts.administeringBody || extractLabeledValue(selectedBlock, '機関') || extractLabeledValue(sourceText, '実施機関'),
+    eligibleApplicants: uniqueList([
+      ...existingFacts.eligibleApplicants,
+      ...splitFactList(extractLabeledValue(selectedBlock, '対象')),
+    ]),
+    eligibleExpenses: uniqueList([
+      ...existingFacts.eligibleExpenses,
+      ...splitFactList(extractLabeledValue(selectedBlock, '経費')),
+    ]),
+    subsidyCap: existingFacts.subsidyCap || extractLabeledValue(selectedBlock, '上限'),
+    applicationDeadline: existingFacts.applicationDeadline || extractLabeledValue(selectedBlock, '締切'),
+    officialSources,
+  };
+
+  const detectedArticleType = normalizeColumnArticleType(input.articleType || nextFacts.articleType, {
+    title,
+    content: `${contentText} ${sourceText}`,
+    category: input.category,
+  });
+  nextFacts.articleType = detectedArticleType;
+  nextFacts.preStartRule =
+    nextFacts.preStartRule.confirmed || nextFacts.preStartRule.safeDescription
+      ? nextFacts.preStartRule
+      : {
+          confirmed: false,
+          allowedFrom: '',
+          safeDescription:
+            START_TIMING_RE.test(sourceText)
+              ? '契約・発注・購入・着手が可能になる時点は、入力素材内の記載をもとに確認が必要です。'
+              : '',
+          sourceId: '',
+        };
+
+  return {
+    ...nextFacts,
+    unknownFields: uniqueList([...nextFacts.unknownFields, ...getMissingSourceFactFields(nextFacts, title)]),
+  };
+};
+
+const sourceFactEvidenceText = (facts = {}) =>
+  stripHtmlToText(
+    [
+      facts.officialName,
+      facts.fiscalYear,
+      facts.applicationRound,
+      facts.administeringBody,
+      facts.supervisingBody,
+      facts.applicationStart,
+      facts.applicationDeadline,
+      facts.subsidyRate,
+      facts.subsidyCap,
+      ...(facts.eligibleApplicants || []),
+      ...(facts.eligibleProjects || []),
+      ...(facts.eligibleExpenses || []),
+      ...(facts.ineligibleExpenses || []),
+      ...(facts.applicationMethods || []),
+      facts.projectPeriod,
+      facts.preStartRule?.safeDescription,
+      ...(facts.officialSources || []).map((source) => `${source.label} ${source.url} ${source.checkedAt} ${source.evidence}`),
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
+
+const hasUsableOfficialSource = (facts = {}) =>
+  (facts.officialSources || []).some((source) => source.url && source.evidence && source.evidence.length >= 12);
+
+const getMissingSourceFactFields = (facts = {}, title = '') => {
+  const articleType = normalizeColumnArticleType(facts.articleType, { title });
+  const required = [...(SOURCE_FACT_REQUIRED_BY_TYPE[articleType] || SOURCE_FACT_REQUIRED_BY_TYPE.feature)];
+  if (articleType === 'single_program' || AMOUNT_PROMISE_RE.test(title)) {
+    required.push('subsidyRate', 'subsidyCap');
+  }
+  if (articleType === 'single_program' || YEAR_PROMISE_RE.test(title) || DEADLINE_PROMISE_RE.test(title)) {
+    required.push('applicationDeadline');
+  }
+
+  return uniqueList(
+    required.filter((field) => {
+      if (field === 'officialSources') return !hasUsableOfficialSource(facts);
+      const value = facts[field];
+      if (Array.isArray(value)) return value.length === 0;
+      return !textValue(value);
+    })
+  );
+};
+
+const formatMissingFact = (field) => {
+  const labels = {
+    officialName: '具体的な制度名',
+    administeringBody: '実施機関',
+    officialSources: '公式URLと根拠メモ',
+    eligibleApplicants: '対象者',
+    eligibleProjects: '対象事業',
+    eligibleExpenses: '対象経費',
+    subsidyRate: '補助率',
+    subsidyCap: '上限額',
+    applicationDeadline: '申請期間・締切',
+  };
+  return labels[field] || field;
+};
+
+const calculateSourceCoverageScore = (missingFacts = []) =>
+  Math.max(0, Math.min(100, 100 - uniqueList(missingFacts).length * 12));
+
+const fieldSupported = (factsText = '', value = '') => {
+  const needle = stripHtmlToText(value);
+  return Boolean(needle && factsText.includes(needle));
+};
+
+const extractNumericClaims = (text = '') =>
+  uniqueList(Array.from(String(text || '').matchAll(CLAIM_NUMBER_RE)).map((match) => match[0]));
+
+const normalizeClaimText = (value = '') => stripHtmlToText(value).replace(/\s/g, '');
+
+const claimSupportedByFacts = (claim = '', sourceFacts = {}, factsText = '') => {
+  const normalizedClaim = normalizeClaimText(claim);
+  const normalizedFacts = normalizeClaimText(factsText);
+  if (normalizedFacts.includes(normalizedClaim)) return true;
+
+  const rate = normalizeClaimText(sourceFacts.subsidyRate);
+  const cap = normalizeClaimText(sourceFacts.subsidyCap);
+  const deadline = normalizeClaimText(sourceFacts.applicationDeadline);
+
+  if (/補助率/.test(claim) && rate && normalizedClaim.includes(rate)) return true;
+  if (/(上限額|補助上限|上限)/.test(claim) && cap && normalizedClaim.includes(cap)) return true;
+  if (/(締切|申請締切|公募期間|受付期間)/.test(claim) && deadline) {
+    if (normalizedClaim.includes(deadline) || deadline.includes(normalizedClaim.replace(/.*?(20\d{2}年\d{1,2}月).*/, '$1'))) {
+      return true;
+    }
+  }
+  if (rate && cap && normalizedClaim.includes(rate) && normalizedClaim.includes(cap)) return true;
+  return false;
+};
+
+const buildFactualClaims = ({ title = '', text = '', sourceFacts = {} }) => {
+  const factsText = sourceFactEvidenceText(sourceFacts);
+  const claims = [];
+  const addClaim = (claim, status, reason = '', sourceIds = []) => {
+    claims.push({ claim, status, sourceIds, reason });
+  };
+
+  for (const claim of extractNumericClaims(text)) {
+    const supported = claimSupportedByFacts(claim, sourceFacts, factsText);
+    addClaim(
+      claim,
+      supported ? 'supported' : 'unsupported',
+      supported ? '' : 'suppliedFacts に同じ金額・日付・補助率の根拠がありません。',
+      supported ? ['source-1'] : []
+    );
+  }
+
+  if (AMOUNT_PROMISE_RE.test(title) && (!sourceFacts.subsidyRate || !sourceFacts.subsidyCap)) {
+    addClaim(
+      'タイトルで補助率・上限額を約束しているが、公式ファクトに具体値がありません。',
+      'unsupported',
+      'タイトル安全化が必要です。'
+    );
+  }
+
+  if (sourceFacts.subsidyCap && AMOUNT_PROMISE_RE.test(text) && MONEY_OR_RATE_RE.test(text) && !fieldSupported(text, sourceFacts.subsidyCap)) {
+    addClaim(
+      '本文中の上限額らしき記述が、suppliedFacts の上限額と一致しない可能性があります。',
+      'contradictory',
+      '公式ファクトの上限額と本文の金額を照合してください。',
+      ['source-1']
+    );
+  }
+
+  if (INDUSTRY_UNSUPPORTED_RE.test(text) && !/(建設業|製造業|サービス業)/.test(factsText)) {
+    addClaim('対象業種の根拠がない', 'unsupported', 'suppliedFacts に建設業・製造業・サービス業の根拠がありません。');
+  }
+
+  if (EXPENSE_UNSUPPORTED_RE.test(text) && !/(新規設備導入費|研修費|調査費)/.test(factsText)) {
+    addClaim('対象経費の根拠がない', 'unsupported', 'suppliedFacts に新規設備導入費・研修費・調査費の根拠がありません。');
+  }
+
+  if (EXCLUDED_UNSUPPORTED_RE.test(text) && !/(中古品|人件費)/.test(factsText)) {
+    addClaim('対象外経費の根拠がない', 'unsupported', 'suppliedFacts に中古品・人件費を対象外とする根拠がありません。');
+  }
+
+  return uniqueList(claims.map((claim) => JSON.stringify(claim))).map((claim) => JSON.parse(claim));
+};
+
+const calculateFactualGroundingScore = (factualClaims = [], hasOfficialEvidence = false) => {
+  const unsupportedCount = factualClaims.filter((claim) => claim.status === 'unsupported').length;
+  const contradictoryCount = factualClaims.filter((claim) => claim.status === 'contradictory').length;
+  const base = hasOfficialEvidence ? 100 : 60;
+  return Math.max(0, Math.min(100, base - unsupportedCount * 20 - contradictoryCount * 35));
+};
+
+const suggestSafeTitles = ({ title = '', sourceFacts = {} }) => {
+  const articleType = normalizeColumnArticleType(sourceFacts.articleType, { title });
+  const theme = title
+    .replace(/｜.*$/, '')
+    .replace(/令和\s*\d+\s*年度|20\d{2}\s*年|補助率|上限額|補助上限|締切|第\s*[0-9０-９一二三四五六七八九]+\s*次公募/g, '')
+    .replace(/[|｜:：]+/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+  const base = theme || sourceFacts.officialName || '愛媛県の補助金';
+
+  if (articleType === 'single_program' && sourceFacts.officialName) {
+    return uniqueList([
+      `${sourceFacts.officialName}の確認ポイント`,
+      `${sourceFacts.officialName}の対象者・対象経費と申請前の注意点`,
+    ]);
+  }
+
+  return uniqueList([
+    `${base}の探し方と申請前の注意点`,
+    `${base}で確認したい補助金・支援制度`,
+    `${base}向け補助金の公式情報確認ポイント`,
+  ]);
+};
+
 export const createDefaultLlmReview = (overrides = {}) => {
   const semanticScore = normalizeScore(overrides.semanticScore);
 
@@ -238,29 +648,85 @@ const normalizeLlmReview = (value = {}) => {
   return createDefaultLlmReview(value);
 };
 
+const normalizeFactualClaims = (items = []) =>
+  Array.isArray(items)
+    ? items
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null;
+          const status = ['supported', 'unsupported', 'contradictory', 'unclear'].includes(item.status)
+            ? item.status
+            : 'unclear';
+          return {
+            claim: textValue(item.claim),
+            status,
+            sourceIds: uniqueList(item.sourceIds || item.source_ids || []),
+            reason: textValue(item.reason),
+          };
+        })
+        .filter((item) => item?.claim)
+    : [];
+
 export const normalizeQualityReview = (review = {}) => {
   if (!review || typeof review !== 'object') return null;
 
   const qualityScore = normalizeScore(review.qualityScore);
   const ruleBasedScore = normalizeScore(review.ruleBasedScore ?? review.deterministicScore ?? review.qualityScore);
+  const sourceCoverageScore = normalizeScore(review.sourceCoverageScore);
+  const factualGroundingScore = normalizeScore(review.factualGroundingScore);
+  const contentQualityScore = normalizeScore(review.contentQualityScore);
   const fatalIssues = uniqueList(review.fatalIssues);
   const warnings = uniqueList(review.warnings);
   const scoreCapsApplied = uniqueList(review.scoreCapsApplied);
   const scoreCap = scoreCapsApplied.length
     ? Math.min(...scoreCapsApplied.map(extractCapValue))
     : 100;
-  const cappedQualityScore = Math.min(qualityScore, scoreCap);
+  const cappedQualityScore = Math.min(
+    normalizeScore(review.finalScore ?? qualityScore),
+    qualityScore || 100,
+    scoreCap
+  );
   const shouldRegenerate = Boolean(review.shouldRegenerate || fatalIssues.length > 0 || cappedQualityScore < 80);
+  const factualClaims = normalizeFactualClaims(review.factualClaims);
+  const unsupportedClaims = uniqueList(
+    review.unsupportedClaims ||
+      factualClaims.filter((claim) => claim.status === 'unsupported').map((claim) => claim.claim)
+  );
+  const contradictoryClaims = uniqueList(
+    review.contradictoryClaims ||
+      factualClaims.filter((claim) => claim.status === 'contradictory').map((claim) => claim.claim)
+  );
+  const sourceFacts = normalizeSourceFacts(review.sourceFacts || review.source_facts || {});
+  const articleType = normalizeColumnArticleType(review.articleType || sourceFacts.articleType);
 
   return {
     qualityScore: cappedQualityScore,
     ruleBasedScore,
+    sourceCoverageScore,
+    factualGroundingScore,
+    contentQualityScore,
+    finalScore: cappedQualityScore,
     grade: gradeFromScore(cappedQualityScore),
+    articleType,
+    articleTypeLabel: ARTICLE_TYPE_LABELS[articleType] || articleType,
+    sourceFacts,
+    missingFacts: uniqueList(review.missingFacts || sourceFacts.unknownFields),
+    factualClaims,
+    unsupportedClaims,
+    contradictoryClaims,
     fatalIssues,
     warnings,
     strengths: uniqueList(review.strengths),
     improvementSuggestions: uniqueList(review.improvementSuggestions),
     scoreCapsApplied,
+    titleNeedsRewrite: Boolean(review.titleNeedsRewrite),
+    suggestedTitles: uniqueList(review.suggestedTitles),
+    publishAllowed: Boolean(
+      review.publishAllowed &&
+        fatalIssues.length === 0 &&
+        unsupportedClaims.length === 0 &&
+        contradictoryClaims.length === 0 &&
+        cappedQualityScore >= 90
+    ),
     llmReview: normalizeLlmReview(review.llmReview),
     shouldRegenerate,
     shouldHumanReview: review.shouldHumanReview !== false,
@@ -278,7 +744,25 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   const h2Count = (content.match(/<h2[\s>]/gi) || []).length;
   const hasTable = /<table[\s>]|<th[\s>]|<td[\s>]/i.test(content);
   const hasChecklist = /チェックリスト|確認リスト|<ul[\s>]|<ol[\s>]/i.test(content);
-  const isFeature = options.articleType === 'feature' || column.category === '特集';
+  const sourceFacts = buildColumnSourceFacts({
+    sourceFacts: options.sourceFacts || column.sourceFacts || column.source_facts || column.quality_review?.sourceFacts,
+    sourceText: options.sourceText,
+    subsidiesText: options.subsidiesText,
+    aiInstructions: column.ai_instructions,
+    officialMemo: options.officialMemo,
+    title,
+    content,
+    category: column.category,
+    articleType: options.articleType,
+    subsidyId: column.subsidy_id,
+  });
+  const articleType = normalizeColumnArticleType(options.articleType || sourceFacts.articleType, {
+    title,
+    content: text,
+    category: column.category,
+  });
+  sourceFacts.articleType = articleType;
+  const isFeature = articleType === 'feature' || column.category === '特集';
   const fatalIssues = [];
   const warnings = [];
   const strengths = [];
@@ -286,9 +770,21 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   const scoreCapsApplied = [];
   const scoreCapValues = [];
   const hasOfficialRoute = externalLinks.length > 0 || OFFICIAL_RE.test(text);
+  const hasOfficialEvidence = hasUsableOfficialSource(sourceFacts);
+  const missingFacts = getMissingSourceFactFields(sourceFacts, title);
+  const sourceCoverageScore = calculateSourceCoverageScore(missingFacts);
+  const factualClaims = buildFactualClaims({ title, text, sourceFacts });
+  const unsupportedClaims = uniqueList(
+    factualClaims.filter((claim) => claim.status === 'unsupported').map((claim) => claim.claim)
+  );
+  const contradictoryClaims = uniqueList(
+    factualClaims.filter((claim) => claim.status === 'contradictory').map((claim) => claim.claim)
+  );
   const hasConcretePublicOfferingTitle = PUBLIC_OFFERING_TITLE_RE.test(title) && !GENERIC_TITLE_RE.test(title);
   const titlePromisesSpecifics =
     AMOUNT_PROMISE_RE.test(title) || YEAR_PROMISE_RE.test(title) || DEADLINE_PROMISE_RE.test(title);
+  let titleNeedsRewrite = false;
+  const suggestedTitles = [];
 
   const addFatal = (message, suggestion = '') => {
     fatalIssues.push(message);
@@ -328,31 +824,59 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     );
   }
 
+  if (!hasOfficialEvidence) {
+    addWarning(
+      '公式URLだけ、または本文内リンクだけでは公式ファクト確認済みとして扱えません。',
+      '管理画面の素材欄や自動生成データに、制度名・実施機関・上限額・締切など一次情報から確認した根拠メモを入れてください。'
+    );
+    addScoreCap(89, '公式URLと根拠メモが揃っていないため、100点・90点台の上限を制限します。');
+  }
+
+  if (missingFacts.length > 0) {
+    addWarning(
+      `公式ファクトが不足しています: ${missingFacts.map(formatMissingFact).join('、')}`,
+      '不足している公式情報は本文で断定せず、missingFacts として管理画面で確認してください。'
+    );
+  } else {
+    strengths.push('公式ファクトの必須項目が揃っています。');
+  }
+
   if (AMOUNT_PROMISE_RE.test(title)) {
-    const hasAmountEvidence = AMOUNT_PROMISE_RE.test(text) && MONEY_OR_RATE_RE.test(text) && OFFICIAL_RE.test(text);
+    const hasAmountEvidence =
+      sourceFacts.subsidyRate &&
+      sourceFacts.subsidyCap &&
+      AMOUNT_PROMISE_RE.test(text) &&
+      MONEY_OR_RATE_RE.test(text) &&
+      hasOfficialEvidence;
     if (!hasAmountEvidence) {
       addFatal(
-        'タイトルに補助率・上限額などの具体情報があるのに、本文に具体的な数字・制度名・公式確認導線が不足しています。',
+        'タイトルで補助率・上限額を約束しているが本文と公式ファクトに具体情報がありません。',
         '具体情報を確認できない場合は、タイトルを「確認ポイント」「探し方」など安全な表現に弱めてください。'
       );
       addScoreCap(39, 'タイトルの補助率・上限額・金額の約束に本文が答えていません。');
+      titleNeedsRewrite = true;
+      suggestedTitles.push(...suggestSafeTitles({ title, sourceFacts }));
     }
   }
 
-  if (YEAR_PROMISE_RE.test(title) && !YEAR_PROMISE_RE.test(text)) {
+  if (YEAR_PROMISE_RE.test(title) && (!YEAR_PROMISE_RE.test(text) || !hasOfficialEvidence)) {
     addFatal(
       'タイトルに年度・年号がありますが、本文で同じ年度の根拠説明が不足しています。',
       '年度をタイトルに入れる場合は、本文にも公式確認日や該当年度の根拠を入れてください。'
     );
     addScoreCap(39, 'タイトルの年度・年号の約束に本文が答えていません。');
+    titleNeedsRewrite = true;
+    suggestedTitles.push(...suggestSafeTitles({ title, sourceFacts }));
   }
 
-  if (DEADLINE_PROMISE_RE.test(title) && !DEADLINE_DETAIL_RE.test(text)) {
+  if (DEADLINE_PROMISE_RE.test(title) && (!DEADLINE_DETAIL_RE.test(text) || !hasOfficialEvidence)) {
     addFatal(
       'タイトルに締切・公募回・申請期間がありますが、本文に対応する期間・締切・回次の説明が不足しています。',
       '公募期間、締切、開始日、回次が不明な場合は、タイトルを「確認ポイント」など安全な表現に弱めてください。'
     );
     addScoreCap(39, 'タイトルの締切・公募回の約束に本文が答えていません。');
+    titleNeedsRewrite = true;
+    suggestedTitles.push(...suggestSafeTitles({ title, sourceFacts }));
   }
 
   if (RISKY_PROMISE_RE.test(text)) {
@@ -414,12 +938,12 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     strengths.push('対象者・対象経費・対象外の観点があります。');
   }
 
-  if (!PRE_CONTRACT_RE.test(text)) {
+  if (!PRE_CONTRACT_RE.test(text) && !START_TIMING_RE.test(text)) {
     addFatal(
-      '申請前に契約・発注・購入・着手しない注意がありません。',
-      '交付決定前の契約・発注・購入・着手が対象外になる可能性を明記してください。'
+      '契約・発注・購入・着手が可能になる時点について、制度ごとの確認を促す注意がありません。',
+      '公式情報で確認できない場合は、交付決定前などに発生した経費が対象外になる場合があるため、公募要領と実施機関への確認が必要と安全に書いてください。'
     );
-    addScoreCap(69, '申請前に契約・発注・購入・着手しない注意がありません。');
+    addScoreCap(69, '契約・発注・購入・着手が可能になる時点の注意がありません。');
   }
 
   if (!EHIME_CONTEXT_RE.test(text)) {
@@ -454,20 +978,30 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     addScoreCap(39, 'タイトルの具体情報に対する公式確認導線がありません。');
   }
 
-  if (hasConcretePublicOfferingTitle) {
+  if (titlePromisesSpecifics && !hasOfficialEvidence) {
+    addFatal(
+      'タイトルに具体的な条件があるのに、suppliedFacts に公式根拠がありません。',
+      '補助率・上限額・年度・締切をタイトルに入れる前に、公式ファクトを構造化してください。'
+    );
+    addScoreCap(39, 'タイトルの具体情報に対する公式ファクトがありません。');
+    titleNeedsRewrite = true;
+    suggestedTitles.push(...suggestSafeTitles({ title, sourceFacts }));
+  }
+
+  if (articleType === 'single_program' || hasConcretePublicOfferingTitle) {
     const missingOfferingFields = [];
-    if (!DEADLINE_DETAIL_RE.test(text)) missingOfferingFields.push('公募期間・締切');
-    if (!IMPLEMENTER_RE.test(text)) missingOfferingFields.push('実施機関');
+    if (!DEADLINE_DETAIL_RE.test(text) || !sourceFacts.applicationDeadline) missingOfferingFields.push('公募期間・締切');
+    if (!IMPLEMENTER_RE.test(text) || !sourceFacts.administeringBody) missingOfferingFields.push('実施機関');
     if (DEADLINE_PROMISE_RE.test(title) && !ROUND_DETAIL_RE.test(text)) missingOfferingFields.push('回次');
-    if (externalLinks.length === 0) missingOfferingFields.push('公式URL');
+    if (externalLinks.length === 0 || !hasOfficialEvidence) missingOfferingFields.push('公式URL・根拠メモ');
     if (!REVIEWED_DATE_RE.test(text)) missingOfferingFields.push('確認日');
 
-    if (missingOfferingFields.some((field) => ['公募期間・締切', '実施機関', '公式URL'].includes(field))) {
+    if (missingOfferingFields.some((field) => ['公募期間・締切', '実施機関', '公式URL・根拠メモ'].includes(field))) {
       addFatal(
         `具体的な公募名・制度名の記事として、${missingOfferingFields.join('、')}が不足しています。`,
         '制度名を具体的に出す場合は、表に年度、回次、実施機関、公募期間、締切、補助率、上限額、対象者、対象事業、対象経費、対象外経費、公式URL、確認日を整理してください。'
       );
-      addScoreCap(69, '具体的な公募名・制度名に必要な実施機関・公募期間・公式URLが不足しています。');
+      addScoreCap(49, '具体的な公募名・制度名に必要な実施機関・公募期間・公式URL・根拠メモが不足しています。');
     }
   }
 
@@ -479,7 +1013,7 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     addScoreCap(49, 'FS調査事業と本文内容がズレています。');
   }
 
-  if ((DEFINITE_NUMBER_RE.test(text) || (MONEY_OR_RATE_RE.test(text) && YEAR_PROMISE_RE.test(text))) && !hasOfficialRoute) {
+  if ((DEFINITE_NUMBER_RE.test(text) || (MONEY_OR_RATE_RE.test(text) && YEAR_PROMISE_RE.test(text))) && !hasOfficialEvidence) {
     addFatal(
       '未確認の補助率・上限額・年度情報を確定情報として書いている可能性があります。',
       '公式情報で確認できない数字は断定せず、「確認が必要です」「公募要領で確認してください」と表現してください。'
@@ -487,39 +1021,90 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     addScoreCap(39, '未確認の補助率・上限額・年度情報を断定しています。');
   }
 
+  if (unsupportedClaims.length > 0) {
+    addFatal(
+      `公式ファクトで裏付けられない具体的主張があります: ${unsupportedClaims.join('、')}`,
+      '対象者・対象経費・対象外経費・金額・日付は、suppliedFacts にある範囲だけを書いてください。'
+    );
+    addScoreCap(39, '本文中に根拠不明の金額・日付・対象者・対象経費があります。');
+  }
+
+  if (contradictoryClaims.length > 0) {
+    addFatal(
+      `公式ファクトと矛盾する可能性がある主張があります: ${contradictoryClaims.join('、')}`,
+      '本文の具体値を公式ファクトに合わせるか、根拠がない場合は削除してください。'
+    );
+    addScoreCap(29, '公式情報と矛盾する可能性がある主張があります。');
+  }
+
   const hasConcreteAudienceExpenseExclusions =
     TARGET_RE.test(text) && EXPENSE_RE.test(text) && EXCLUDED_EXPENSE_RE.test(text) && PROJECT_RE.test(text);
+  const factualGroundingScore = calculateFactualGroundingScore(factualClaims, hasOfficialEvidence);
   const highScoreRequirementsMet =
     textLength >= MIN_RECOMMENDED_ARTICLE_TEXT_LENGTH &&
+    sourceCoverageScore === 100 &&
+    factualGroundingScore === 100 &&
     hasConcreteAudienceExpenseExclusions &&
-    PRE_CONTRACT_RE.test(text) &&
+    (PRE_CONTRACT_RE.test(text) || START_TIMING_RE.test(text)) &&
     hasOfficialRoute &&
+    hasOfficialEvidence &&
     EHIME_CONTEXT_RE.test(text) &&
     hasTable &&
     hasChecklist &&
     internalLinks.length > 0 &&
     CTA_RE.test(text) &&
     !MANAGEMENT_MEMO_RE.test(content) &&
-    !((DEFINITE_NUMBER_RE.test(text) || MONEY_OR_RATE_RE.test(text)) && !hasOfficialRoute);
+    unsupportedClaims.length === 0 &&
+    contradictoryClaims.length === 0 &&
+    !((DEFINITE_NUMBER_RE.test(text) || MONEY_OR_RATE_RE.test(text)) && !hasOfficialEvidence);
 
   if (!highScoreRequirementsMet) {
     addScoreCap(89, '90点以上に必要な強条件をすべて満たしていません。');
   }
 
+  if (!options.humanReviewed) {
+    addScoreCap(99, '人間確認完了が確認できないため100点にはしません。');
+  }
+
   const baseScore = Math.max(0, Math.min(100, 100 - fatalIssues.length * 12 - warnings.length * 4));
   const hardScoreCap = scoreCapValues.length ? Math.min(...scoreCapValues) : 100;
-  const qualityScore = Math.min(baseScore, hardScoreCap);
+  const contentQualityScore = Math.min(baseScore, hardScoreCap);
+  const qualityScore = Math.min(baseScore, sourceCoverageScore, factualGroundingScore, hardScoreCap);
   const grade = gradeFromScore(qualityScore);
+  const publishAllowed =
+    qualityScore >= 90 &&
+    fatalIssues.length === 0 &&
+    unsupportedClaims.length === 0 &&
+    contradictoryClaims.length === 0 &&
+    !titleNeedsRewrite &&
+    hasOfficialEvidence;
 
   return {
     qualityScore,
     ruleBasedScore: qualityScore,
+    sourceCoverageScore,
+    factualGroundingScore,
+    contentQualityScore,
+    finalScore: qualityScore,
     grade,
+    articleType,
+    articleTypeLabel: ARTICLE_TYPE_LABELS[articleType] || articleType,
+    sourceFacts: {
+      ...sourceFacts,
+      unknownFields: uniqueList([...sourceFacts.unknownFields, ...missingFacts]),
+    },
+    missingFacts: uniqueList(missingFacts),
+    factualClaims,
+    unsupportedClaims,
+    contradictoryClaims,
     fatalIssues: uniqueList(fatalIssues),
     warnings: uniqueList(warnings),
     strengths: uniqueList(strengths),
     improvementSuggestions: uniqueList(improvementSuggestions),
     scoreCapsApplied: uniqueList(scoreCapsApplied),
+    titleNeedsRewrite,
+    suggestedTitles: uniqueList(suggestedTitles),
+    publishAllowed,
     llmReview: createDefaultLlmReview(),
     shouldRegenerate: fatalIssues.length > 0 || qualityScore < 80,
     shouldHumanReview: true,
@@ -531,6 +1116,8 @@ export const mergeColumnQualityReview = (aiReview, column = {}, options = {}) =>
   const normalizedAiReview = normalizeQualityReview(aiReview);
 
   if (!normalizedAiReview) return machineReview;
+  const aiPublishKnown =
+    aiReview && typeof aiReview === 'object' && Object.prototype.hasOwnProperty.call(aiReview, 'publishAllowed');
 
   const fatalIssues = uniqueList([...normalizedAiReview.fatalIssues, ...machineReview.fatalIssues]);
   const warnings = uniqueList([...normalizedAiReview.warnings, ...machineReview.warnings]);
@@ -547,11 +1134,48 @@ export const mergeColumnQualityReview = (aiReview, column = {}, options = {}) =>
   const llmReview = normalizedAiReview.llmReview?.usedApi || normalizedAiReview.llmReview?.enabled
     ? normalizedAiReview.llmReview
     : machineReview.llmReview;
+  const factualClaims = [
+    ...(normalizedAiReview.factualClaims || []),
+    ...(machineReview.factualClaims || []),
+  ];
+  const unsupportedClaims = uniqueList([
+    ...(normalizedAiReview.unsupportedClaims || []),
+    ...(machineReview.unsupportedClaims || []),
+  ]);
+  const contradictoryClaims = uniqueList([
+    ...(normalizedAiReview.contradictoryClaims || []),
+    ...(machineReview.contradictoryClaims || []),
+  ]);
+  const titleNeedsRewrite = Boolean(normalizedAiReview.titleNeedsRewrite || machineReview.titleNeedsRewrite);
+  const suggestedTitles = uniqueList([
+    ...(normalizedAiReview.suggestedTitles || []),
+    ...(machineReview.suggestedTitles || []),
+  ]);
+  const publishAllowed = Boolean(
+    (!aiPublishKnown || normalizedAiReview.publishAllowed) &&
+      machineReview.publishAllowed &&
+      fatalIssues.length === 0 &&
+      unsupportedClaims.length === 0 &&
+      contradictoryClaims.length === 0 &&
+      !titleNeedsRewrite &&
+      cappedQualityScore >= 90
+  );
 
   return {
     qualityScore: cappedQualityScore,
     ruleBasedScore: machineReview.ruleBasedScore,
+    sourceCoverageScore: machineReview.sourceCoverageScore,
+    factualGroundingScore: machineReview.factualGroundingScore,
+    contentQualityScore: machineReview.contentQualityScore,
+    finalScore: cappedQualityScore,
     grade,
+    articleType: machineReview.articleType,
+    articleTypeLabel: machineReview.articleTypeLabel,
+    sourceFacts: machineReview.sourceFacts,
+    missingFacts: uniqueList([...(normalizedAiReview.missingFacts || []), ...(machineReview.missingFacts || [])]),
+    factualClaims: normalizeFactualClaims(factualClaims),
+    unsupportedClaims,
+    contradictoryClaims,
     fatalIssues,
     warnings,
     strengths: uniqueList([...normalizedAiReview.strengths, ...machineReview.strengths]),
@@ -560,6 +1184,9 @@ export const mergeColumnQualityReview = (aiReview, column = {}, options = {}) =>
       ...machineReview.improvementSuggestions,
     ]),
     scoreCapsApplied,
+    titleNeedsRewrite,
+    suggestedTitles,
+    publishAllowed,
     llmReview,
     shouldRegenerate:
       normalizedAiReview.shouldRegenerate ||
