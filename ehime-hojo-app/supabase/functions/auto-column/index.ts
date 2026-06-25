@@ -276,6 +276,37 @@ const normalizeAiQualityReview = (value: unknown): ArticleQualityReview | null =
 const countInternalLinks = (value: string) =>
   extractLinks(value).filter((href) => href.startsWith("/") || /ehime-hojokin\.jp/i.test(href)).length;
 
+const allowedInternalLinkRe =
+  /^\/(?:$|[?#]|ehime-subsidy\/?(?:[?#].*)?$|search(?:[?#].*)?$|simulator\/?(?:[?#].*)?$|experts\/?(?:[?#].*)?$|columns\/?(?:[?#].*)?$|features\/?(?:[?#].*)?$|beginners\/?(?:[?#].*)?$|feature\/[a-z0-9-]+\/?(?:[?#].*)?$|purpose\/[a-z0-9-]+\/?(?:[?#].*)?$|area\/[a-z0-9-]+\/?(?:[?#].*)?$|column\/[a-z0-9-]+\/?(?:[?#].*)?$|subsidy\/[0-9]+\/?(?:[?#].*)?$)/i;
+
+const normalizeInternalHrefPath = (href = "") => {
+  const value = String(href || "").trim();
+  if (!value) return "";
+  if (value.startsWith("/")) return value;
+  if (/^https?:\/\//i.test(value) && /ehime-hojokin\.jp/i.test(value)) {
+    try {
+      const url = new URL(value);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return value;
+    }
+  }
+  return "";
+};
+
+const getInvalidInternalLinks = (content = "") =>
+  Array.from(new Set(
+    extractLinks(content)
+      .map(normalizeInternalHrefPath)
+      .filter(Boolean)
+      .filter((href) => !allowedInternalLinkRe.test(href))
+  ));
+
+const normalizeGeneratedInternalLinks = (content = "") =>
+  String(content || "")
+    .replace(/href=(["'])\/subsidy-list\/?\1/gi, 'href=$1/ehime-subsidy/$1')
+    .replace(/href=(["'])https:\/\/ehime-hojokin\.jp\/subsidy-list\/?\1/gi, 'href=$1/ehime-subsidy/$1');
+
 const countH2 = (value: string) => (String(value || "").match(/<h2[\s>]/gi) || []).length;
 
 const hasTable = (value: string) => /<table[\s>]|<th[\s>]|<td[\s>]/i.test(value);
@@ -657,6 +688,7 @@ const buildMachineQualityReview = (
   const scoreCapValues: number[] = [];
   const externalOfficialLinks = countExternalOfficialLinks(content);
   const internalLinks = countInternalLinks(content);
+  const invalidInternalLinks = getInvalidInternalLinks(content);
   const hasOfficialRoute = externalOfficialLinks > 0 || officialRe.test(text);
   const hasOfficialEvidence = hasUsableOfficialSource(sourceFacts);
   const missingFacts = getMissingSourceFactFields(sourceFacts, title);
@@ -771,6 +803,9 @@ const buildMachineQualityReview = (
   if (internalLinks === 0) {
     addFatal("えひめ補助金ポータル内の内部リンクがありません。");
     addScoreCap(59, "内部リンクがありません。");
+  } else if (invalidInternalLinks.length > 0) {
+    addFatal(`存在しない可能性がある内部リンクがあります: ${invalidInternalLinks.join("、")}`);
+    addScoreCap(59, "存在しない可能性がある内部リンクがあります。");
   } else {
     strengths.push("内部リンクがあります。");
   }
@@ -864,6 +899,7 @@ const buildMachineQualityReview = (
     hasTable(content) &&
     hasChecklist(content) &&
     internalLinks > 0 &&
+    invalidInternalLinks.length === 0 &&
     ctaRe.test(text) &&
     !managementMemoRe.test(content) &&
     unsupportedClaims.length === 0 &&
@@ -1684,6 +1720,7 @@ serve(async (req: Request) => {
 - 管理用メモ、品質スコア、fatalIssues、warnings、missingFacts、unsupportedClaims を content に入れない。
 - 使用HTMLは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <caption> のみ。
 - 表、チェックリスト、内部リンク、CTA、公式確認導線を残す。
+- 内部リンクは実在するものだけにする。/subsidy-list は使わず、補助金一覧は /ehime-subsidy/ にする。
 - 契約・発注・購入・着手が可能になる時点は、制度ごとに公募要領と実施機関へ確認する安全表現にする。
 `.trim(),
             },
@@ -1752,7 +1789,7 @@ ${JSON.stringify({
         seo_title: repairedArticle.seo_title || repairedArticle.title || originalTitle,
         meta_description: repairedArticle.meta_description || "",
         thumbnail_text: repairedArticle.thumbnail_text || "Japanese local business subsidy support",
-        content: repairedArticle.content || originalBody,
+        content: normalizeGeneratedInternalLinks(repairedArticle.content || originalBody),
         category: repairedArticle.category || preferredCategory || "補助金情報",
         tags: Array.isArray(repairedArticle.tags) ? repairedArticle.tags : [],
       };
@@ -1849,6 +1886,8 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 - H2を8個以上入れてください。
 - 表を最低1つ、できれば2つ以上入れてください。
 - チェックリスト、CTA、内部リンクを本文に自然に入れてください。
+- 使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
+- 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
 - 対象者、対象経費、対象外になりやすい経費、申請前注意を具体的に書いてください。
 - 申請前に契約・発注・購入・着手しない注意を必ず書いてください。
 - 愛媛県、市町村、商工会議所、商工会、支援機関など愛媛県内の読者向けの視点を入れてください。
@@ -1905,6 +1944,7 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 - 本文が1,500文字未満
 - 表が1つもない
 - 内部リンクが1つもない
+- /subsidy-list など存在しない内部リンクがある
 - 対象者・対象経費・注意点が抽象的すぎる
 - 愛媛県・市町村・地域事業者の視点がない
 - 管理用メモが公開本文に出ている
@@ -2263,8 +2303,10 @@ ${extraInstructionBlock}
     articleData.thumbnail_text =
       articleData.thumbnail_text || "Japanese small business subsidy support";
     articleData.content =
-      articleData.content ||
-      "<p>現在、記事本文を準備中です。詳細は公式情報をご確認ください。</p>";
+      normalizeGeneratedInternalLinks(
+        articleData.content ||
+          "<p>現在、記事本文を準備中です。詳細は公式情報をご確認ください。</p>"
+      );
     articleData.category = articleData.category || "補助金情報";
     if (preferredCategory) {
       articleData.category = preferredCategory;

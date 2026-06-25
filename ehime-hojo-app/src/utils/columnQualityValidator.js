@@ -79,7 +79,8 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 - 表を最低1つ、できれば2つ以上入れてください。
 - チェックリストを入れてください。
 - CTAを入れてください。
-- 関連する内部リンクを本文に自然に入れてください。例: /search?keyword=設備投資, /simulator, /experts, /feature/startup-digital
+- 関連する内部リンクを本文に自然に入れてください。使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
+- 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
 - 公式情報の確認を促してください。
 - 契約・発注・購入・着手が可能になる時点は制度ごとに異なるため、公式情報に基づいて表現してください。公式情報で確認できない場合は「交付決定前などに発生した経費が対象外になる場合があるため、公募要領と実施機関へ確認してください」と安全に書いてください。
 - 対象者、対象経費、対象外になりやすい経費を書いてください。
@@ -170,6 +171,8 @@ const ARTICLE_TYPE_LABELS = {
 };
 
 const INTERNAL_DOMAIN_RE = /ehime-hojokin\.jp/i;
+const ALLOWED_INTERNAL_LINK_RE =
+  /^\/(?:$|[?#]|ehime-subsidy\/?(?:[?#].*)?$|search(?:[?#].*)?$|simulator\/?(?:[?#].*)?$|experts\/?(?:[?#].*)?$|columns\/?(?:[?#].*)?$|features\/?(?:[?#].*)?$|beginners\/?(?:[?#].*)?$|feature\/[a-z0-9-]+\/?(?:[?#].*)?$|purpose\/[a-z0-9-]+\/?(?:[?#].*)?$|area\/[a-z0-9-]+\/?(?:[?#].*)?$|column\/[a-z0-9-]+\/?(?:[?#].*)?$|subsidy\/[0-9]+\/?(?:[?#].*)?$)/i;
 const YEAR_PROMISE_RE = /(令和\s*\d+\s*年度|20\d{2}\s*年|2026\s*年|2027\s*年)/;
 const AMOUNT_PROMISE_RE = /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|上限)/;
 const MONEY_OR_RATE_RE = /(%|％|円|万円|千円|分の[一二三四五六七八九0-9０-９]|[0-9０-９]+\s*\/\s*[0-9０-９]+|[0-9０-９]+\s*割|以内)/;
@@ -241,6 +244,29 @@ export const extractLinks = (html = '') =>
   Array.from(String(html).matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>/gi))
     .map((match) => match[1])
     .filter(Boolean);
+
+const normalizeInternalHrefPath = (href = '') => {
+  const value = String(href || '').trim();
+  if (!value) return '';
+  if (value.startsWith('/')) return value;
+  if (/^https?:\/\//i.test(value) && INTERNAL_DOMAIN_RE.test(value)) {
+    try {
+      const url = new URL(value);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return value;
+    }
+  }
+  return '';
+};
+
+const getInvalidInternalLinks = (links = []) =>
+  uniqueList(
+    links
+      .map(normalizeInternalHrefPath)
+      .filter(Boolean)
+      .filter((href) => !ALLOWED_INTERNAL_LINK_RE.test(href))
+  );
 
 const uniqueList = (items = []) =>
   Array.from(new Set(items.map((item) => String(item || '').trim()).filter(Boolean)));
@@ -741,6 +767,7 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   const links = extractLinks(content);
   const externalLinks = links.filter((href) => /^https?:\/\//i.test(href) && !INTERNAL_DOMAIN_RE.test(href));
   const internalLinks = links.filter((href) => href.startsWith('/') || INTERNAL_DOMAIN_RE.test(href));
+  const invalidInternalLinks = getInvalidInternalLinks(internalLinks);
   const h2Count = (content.match(/<h2[\s>]/gi) || []).length;
   const hasTable = /<table[\s>]|<th[\s>]|<td[\s>]/i.test(content);
   const hasChecklist = /チェックリスト|確認リスト|<ul[\s>]|<ol[\s>]/i.test(content);
@@ -925,6 +952,12 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
       '関連特集、検索ページ、シミュレーター、専門家ページへの自然な内部リンクを入れてください。'
     );
     addScoreCap(59, '内部リンクがありません。');
+  } else if (invalidInternalLinks.length > 0) {
+    addFatal(
+      `存在しない可能性がある内部リンクがあります: ${invalidInternalLinks.join('、')}`,
+      '補助金一覧への導線は /ehime-subsidy/、検索導線は /search?keyword=... を使ってください。/subsidy-list は存在しません。'
+    );
+    addScoreCap(59, '存在しない可能性がある内部リンクがあります。');
   } else {
     strengths.push('内部リンクがあります。');
   }
@@ -1052,6 +1085,7 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     hasTable &&
     hasChecklist &&
     internalLinks.length > 0 &&
+    invalidInternalLinks.length === 0 &&
     CTA_RE.test(text) &&
     !MANAGEMENT_MEMO_RE.test(content) &&
     unsupportedClaims.length === 0 &&
