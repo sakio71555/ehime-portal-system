@@ -42,28 +42,560 @@ const extractLinks = (value: string) =>
 const countExternalOfficialLinks = (value: string) =>
   extractLinks(value).filter((href) => /^https?:\/\//i.test(href) && !/ehime-hojokin\.jp/i.test(href)).length;
 
-const buildArticleQualityWarnings = (articleData: { content?: string }) => {
+type LlmQualityReview = {
+  enabled: boolean;
+  usedApi: boolean;
+  semanticScore: number;
+  titleBodyAlignment: string;
+  factualRisk: string;
+  searchIntentFit: string;
+  reviewerComments: string[];
+};
+
+type ArticleQualityReview = {
+  qualityScore: number;
+  ruleBasedScore: number;
+  grade: "A" | "B" | "C" | "D";
+  fatalIssues: string[];
+  warnings: string[];
+  strengths: string[];
+  improvementSuggestions: string[];
+  scoreCapsApplied: string[];
+  llmReview: LlmQualityReview;
+  shouldRegenerate: boolean;
+  shouldHumanReview: boolean;
+};
+
+const clampScore = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+};
+
+const gradeFromScore = (score: number): ArticleQualityReview["grade"] => {
+  if (score >= 90) return "A";
+  if (score >= 80) return "B";
+  if (score >= 60) return "C";
+  return "D";
+};
+
+const uniqueStrings = (items: unknown) =>
+  Array.isArray(items)
+    ? Array.from(
+        new Set(
+          items
+            .map((item) => (typeof item === "string" ? item.trim() : ""))
+            .filter(Boolean)
+        )
+      )
+    : [];
+
+const defaultLlmReview = (overrides: Partial<LlmQualityReview> = {}): LlmQualityReview => ({
+  enabled: Boolean(overrides.enabled),
+  usedApi: Boolean(overrides.usedApi),
+  semanticScore: clampScore(overrides.semanticScore || 0),
+  titleBodyAlignment: overrides.titleBodyAlignment || "APIレビュー未実行",
+  factualRisk: overrides.factualRisk || "APIレビュー未実行",
+  searchIntentFit: overrides.searchIntentFit || "APIレビュー未実行",
+  reviewerComments: Array.isArray(overrides.reviewerComments)
+    ? Array.from(new Set(overrides.reviewerComments.map((item) => String(item || "").trim()).filter(Boolean)))
+    : [],
+});
+
+const normalizeLlmReview = (value: unknown): LlmQualityReview => {
+  if (!value || typeof value !== "object") return defaultLlmReview();
+  const review = value as Record<string, unknown>;
+  return defaultLlmReview({
+    enabled: Boolean(review.enabled),
+    usedApi: Boolean(review.usedApi),
+    semanticScore: clampScore(review.semanticScore),
+    titleBodyAlignment: typeof review.titleBodyAlignment === "string" ? review.titleBodyAlignment : "",
+    factualRisk: typeof review.factualRisk === "string" ? review.factualRisk : "",
+    searchIntentFit: typeof review.searchIntentFit === "string" ? review.searchIntentFit : "",
+    reviewerComments: uniqueStrings(review.reviewerComments),
+  });
+};
+
+const scoreCapText = (maxScore: number, reason: string) => `${maxScore}点上限: ${reason}`;
+
+const extractScoreCap = (value: string) => {
+  const match = String(value || "").match(/(\d{1,3})\s*点?上限/);
+  return match ? clampScore(match[1]) : 100;
+};
+
+const normalizeAiQualityReview = (value: unknown): ArticleQualityReview | null => {
+  if (!value || typeof value !== "object") return null;
+
+  const review = value as Record<string, unknown>;
+  const qualityScore = clampScore(review.qualityScore);
+  const ruleBasedScore = clampScore(review.ruleBasedScore || review.qualityScore);
+  const fatalIssues = uniqueStrings(review.fatalIssues);
+  const scoreCapsApplied = uniqueStrings(review.scoreCapsApplied);
+  const scoreCap = scoreCapsApplied.length
+    ? Math.min(...scoreCapsApplied.map(extractScoreCap))
+    : 100;
+  const cappedQualityScore = Math.min(qualityScore, scoreCap);
+  const gradeValue = typeof review.grade === "string" ? review.grade : "";
+  const grade = ["A", "B", "C", "D"].includes(gradeValue)
+    ? (gradeValue as ArticleQualityReview["grade"])
+    : gradeFromScore(cappedQualityScore);
+
+  return {
+    qualityScore: cappedQualityScore,
+    ruleBasedScore,
+    grade: gradeFromScore(cappedQualityScore) === grade ? grade : gradeFromScore(cappedQualityScore),
+    fatalIssues,
+    warnings: uniqueStrings(review.warnings),
+    strengths: uniqueStrings(review.strengths),
+    improvementSuggestions: uniqueStrings(review.improvementSuggestions),
+    scoreCapsApplied,
+    llmReview: normalizeLlmReview(review.llmReview),
+    shouldRegenerate: Boolean(review.shouldRegenerate || fatalIssues.length > 0 || cappedQualityScore < 80),
+    shouldHumanReview: review.shouldHumanReview !== false,
+  };
+};
+
+const countInternalLinks = (value: string) =>
+  extractLinks(value).filter((href) => href.startsWith("/") || /ehime-hojokin\.jp/i.test(href)).length;
+
+const countH2 = (value: string) => (String(value || "").match(/<h2[\s>]/gi) || []).length;
+
+const hasTable = (value: string) => /<table[\s>]|<th[\s>]|<td[\s>]/i.test(value);
+
+const hasChecklist = (value: string) => /チェックリスト|確認リスト|<ul[\s>]|<ol[\s>]/i.test(value);
+
+const yearPromiseRe = /(令和\s*\d+\s*年度|20\d{2}\s*年|2026\s*年|2027\s*年)/;
+const amountPromiseRe = /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|上限)/;
+const moneyOrRateRe = /(%|％|円|万円|千円|分の[一二三四五六七八九0-9０-９]|[0-9０-９]+\s*\/\s*[0-9０-９]+|[0-9０-９]+\s*割|以内)/;
+const officialRe = /(公式|募集要項|公募要領|交付要綱|自治体|実施機関|窓口|申請前|最新情報|確認日)/;
+const reviewedDateRe = /(確認日|更新日|掲載日|参照日|閲覧日|令和\s*\d+\s*年\s*\d+\s*月|20\d{2}[/-]\d{1,2}[/-]\d{1,2}|20\d{2}年\d{1,2}月\d{1,2}日)/;
+const deadlinePromiseRe = /(締切|期限|申請期間|公募期間|受付期間|募集期間|第\s*[0-9０-９一二三四五六七八九]+\s*次\s*公募)/;
+const deadlineDetailRe = /(締切|期限|申請期間|公募期間|受付期間|募集期間|開始|終了|必着|消印有効|令和\s*\d+\s*年\s*\d+\s*月|20\d{2}[/-]\d{1,2}[/-]\d{1,2}|20\d{2}年\d{1,2}月\d{1,2}日)/;
+const roundDetailRe = /(第\s*[0-9０-９一二三四五六七八九]+\s*次|一次|二次|三次|四次|公募回|回次)/;
+const implementerRe = /(実施機関|所管|事務局|主催|運営主体|自治体|国|県|市|町|村|愛媛県|経済産業省|中小企業庁|商工会議所|商工会)/;
+const publicOfferingTitleRe = /(第\s*[0-9０-９一二三四五六七八九]+\s*次\s*公募|令和\s*\d+\s*年度.{0,30}(補助金|助成金|給付金|支援事業|調査事業|補助事業)|[一-龥ぁ-んァ-ンA-Za-z0-9０-９・ー]{6,}(補助金|助成金|給付金|支援事業|調査事業|補助事業))/;
+const genericTitleRe = /(一覧|まとめ|探し方|とは|解説|基礎|選び方|向けの補助金|使える補助金|補助金を探す)/;
+const fsTitleRe = /(FS\s*調査|フィージビリティ|実現可能性調査|調査事業)/i;
+const fsDetailRe = /(調査計画|実現可能性|市場調査|事業化可能性|検証|調査費|専門家|委託調査|報告書|計画策定)/;
+const equipmentCenteredRe = /(設備投資|設備導入|機械導入|機器購入|設備購入|購入費|導入費|省エネ設備|生産設備|システム導入)/;
+const definiteNumberRe = /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|令和\s*\d+\s*年度|20\d{2}\s*年).{0,24}(です|となります|対象です|支給されます|補助されます|受けられます|使えます|利用できます)/;
+const riskyPromiseRe = /(必ず|絶対).{0,12}(対象|採択|受給|支給|受け取|もらえ|通る|使える)|誰でも.{0,12}(対象|もらえ|使える|受給|受け取)/;
+const managementMemoRe = /(この記事の作成・確認方針|AIを下書き・整理に活用し、公開前に運営者が|本文内の外部確認リンク|本文内に外部リンクがない場合も|qualityScore|fatalIssues|shouldRegenerate|shouldHumanReview|管理用メモ)/;
+const ehimeContextRe = /(愛媛県|県内|松山市|今治市|宇和島市|新居浜市|西条市|大洲市|西予市|八幡浜市|四国中央市|商工会議所|商工会|地域事業者|えひめ補助金ポータル)/;
+const preContractRe = /(申請前|交付決定前).{0,40}(契約|発注|購入|着手)|(?:契約|発注|購入|着手).{0,40}(申請前|交付決定前)/;
+const targetRe = /(対象者|対象になる|対象となる|事業者|個人事業主|中小企業|法人|市町村|県内事業者)/;
+const expenseRe = /(対象経費|補助対象経費|経費|設備|購入|改修|委託|広告|人件費|旅費|受講費|システム|ソフトウェア|機器)/;
+const excludedExpenseRe = /(対象外|対象にならない|対象外経費|注意が必要な経費|補助対象外)/;
+const ctaRe = /(相談|診断|探す|確認する|問い合わせ|専門家|シミュレーター|次のステップ|公式ページで確認|補助金を探す|申請前に確認)/;
+const projectRe = /(対象事業|補助対象事業|取り組み|取組|事業内容|対象となる事業|支援対象事業)/;
+
+const buildMachineQualityReview = (
+  articleData: { title?: string; seo_title?: string; content?: string; category?: string },
+  articleType = "column"
+): ArticleQualityReview => {
+  const title = articleData.title || articleData.seo_title || "";
   const content = articleData.content || "";
   const text = stripHtml(content);
+  const compactTextLength = text.replace(/\s/g, "").length;
+  const fatalIssues: string[] = [];
   const warnings: string[] = [];
+  const strengths: string[] = [];
+  const improvementSuggestions: string[] = [];
+  const scoreCapsApplied: string[] = [];
+  const scoreCapValues: number[] = [];
+  const externalOfficialLinks = countExternalOfficialLinks(content);
+  const internalLinks = countInternalLinks(content);
+  const hasOfficialRoute = externalOfficialLinks > 0 || officialRe.test(text);
+  const hasConcretePublicOfferingTitle = publicOfferingTitleRe.test(title) && !genericTitleRe.test(title);
+  const titlePromisesSpecifics =
+    amountPromiseRe.test(title) || yearPromiseRe.test(title) || deadlinePromiseRe.test(title);
 
-  if (text.length < 1800) {
-    warnings.push("本文が短めです。1800〜2200字程度を目安に、具体的な判断材料があるか公開前に確認してください。");
+  const addFatal = (message: string, suggestion = "") => {
+    fatalIssues.push(message);
+    if (suggestion) improvementSuggestions.push(suggestion);
+  };
+
+  const addWarning = (message: string, suggestion = "") => {
+    warnings.push(message);
+    if (suggestion) improvementSuggestions.push(suggestion);
+  };
+
+  const addScoreCap = (maxScore: number, reason: string) => {
+    scoreCapValues.push(maxScore);
+    scoreCapsApplied.push(scoreCapText(maxScore, reason));
+  };
+
+  if (compactTextLength < 1500) {
+    addFatal("本文が1,500文字未満です。", "対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。");
+    addScoreCap(49, "本文が1,500文字未満です。");
+  } else if (compactTextLength < 3000) {
+    addWarning("本文が3,000文字未満です。", "概要だけで終わらないよう、用途別・経費別の見方や次の行動を追加してください。");
+    addScoreCap(79, "本文が3,000文字未満です。");
+  } else {
+    strengths.push("通常コラムの推奨文字数を満たしています。");
   }
 
-  if (countExternalOfficialLinks(content) === 0) {
-    warnings.push("公式ページ・募集要項・自治体などへの外部リンクが見つかりません。");
+  if ((articleType === "feature" || articleData.category === "特集") && compactTextLength < 5000) {
+    addWarning("特集記事としては5,000文字未満です。", "特集では業種別・用途別の探し方と関連導線を厚めにしてください。");
   }
 
-  if (!/(公式|募集要項|公募要領|自治体|窓口|申請前|最新情報)/.test(text)) {
-    warnings.push("公式情報確認や申請前確認の案内が弱い可能性があります。");
+  if (amountPromiseRe.test(title)) {
+    const hasAmountEvidence =
+      amountPromiseRe.test(text) &&
+      moneyOrRateRe.test(text) &&
+      officialRe.test(text);
+    if (!hasAmountEvidence) {
+      addFatal(
+        "タイトルに補助率・上限額などの具体情報があるのに、本文に具体的な数字・制度名・公式確認導線が不足しています。",
+        "具体情報を確認できない場合は、タイトルを「確認ポイント」「探し方」など安全な表現に弱めてください。"
+      );
+      addScoreCap(39, "タイトルの補助率・上限額・金額の約束に本文が答えていません。");
+    }
   }
 
-  if (/(必ず|絶対).{0,12}(採択|受給|支給|もらえ|通る|使える)|誰でも.{0,12}(もらえ|使える|受給)/.test(text)) {
-    warnings.push("補助金の受給や採択を断定する表現が含まれている可能性があります。");
+  if (yearPromiseRe.test(title) && !yearPromiseRe.test(text)) {
+    addFatal("タイトルに年度・年号がありますが、本文で同じ年度の根拠説明が不足しています。");
+    addScoreCap(39, "タイトルの年度・年号の約束に本文が答えていません。");
   }
 
-  return warnings;
+  if (deadlinePromiseRe.test(title) && !deadlineDetailRe.test(text)) {
+    addFatal("タイトルに締切・公募回・申請期間がありますが、本文に対応する期間・締切・回次の説明が不足しています。");
+    addScoreCap(39, "タイトルの締切・公募回の約束に本文が答えていません。");
+  }
+
+  if (riskyPromiseRe.test(text)) {
+    addFatal("補助金の対象・受給を断定する表現があります。", "「対象になる可能性があります」「公式要件の確認が必要です」などに弱めてください。");
+  }
+
+  if (managementMemoRe.test(content)) {
+    addFatal("管理用メモや品質レビュー用の文言が公開本文に混ざっています。");
+    addScoreCap(39, "管理用メモが公開本文に混ざっています。");
+  }
+
+  if (!hasOfficialRoute) {
+    addFatal("公式ページ・自治体窓口・実施機関への確認導線がありません。");
+    addScoreCap(49, "公式情報確認の導線がありません。");
+  } else if (externalOfficialLinks === 0) {
+    addWarning("本文内に公式ページなどの外部確認リンクがありません。");
+  } else {
+    strengths.push("公式情報への外部リンクがあります。");
+  }
+
+  if (!hasTable(content)) {
+    addFatal("表が1つもありません。", "対象者、対象経費、補助率、上限額、注意点などを表で整理してください。");
+    addScoreCap(59, "表がありません。");
+  } else {
+    strengths.push("表で情報を整理しています。");
+  }
+
+  if (internalLinks === 0) {
+    addFatal("えひめ補助金ポータル内の内部リンクがありません。");
+    addScoreCap(59, "内部リンクがありません。");
+  } else {
+    strengths.push("内部リンクがあります。");
+  }
+
+  if (!targetRe.test(text) || !expenseRe.test(text) || !excludedExpenseRe.test(text)) {
+    addFatal("対象者・対象経費・対象外になりやすい経費のいずれかが不足しています。");
+  }
+
+  if (!preContractRe.test(text)) {
+    addFatal("申請前に契約・発注・購入・着手しない注意がありません。");
+    addScoreCap(69, "申請前に契約・発注・購入・着手しない注意がありません。");
+  }
+
+  if (!ehimeContextRe.test(text)) {
+    addFatal("愛媛県・市町村・地域事業者の視点が不足しています。");
+  } else {
+    strengths.push("愛媛県内の読者向けの文脈があります。");
+  }
+
+  if (countH2(content) < 8) {
+    addWarning("H2が8個未満です。");
+  }
+
+  if (!hasChecklist(content)) {
+    addWarning("チェックリストがありません。");
+  }
+
+  if (!ctaRe.test(text)) {
+    addWarning("CTAが弱い可能性があります。");
+  }
+
+  if (titlePromisesSpecifics && !hasOfficialRoute) {
+    addFatal("タイトルに具体的な条件があるのに、公式情報で確認する導線が不足しています。");
+    addScoreCap(39, "タイトルの具体情報に対する公式確認導線がありません。");
+  }
+
+  if (hasConcretePublicOfferingTitle) {
+    const missingOfferingFields: string[] = [];
+    if (!deadlineDetailRe.test(text)) missingOfferingFields.push("公募期間・締切");
+    if (!implementerRe.test(text)) missingOfferingFields.push("実施機関");
+    if (deadlinePromiseRe.test(title) && !roundDetailRe.test(text)) missingOfferingFields.push("回次");
+    if (externalOfficialLinks === 0) missingOfferingFields.push("公式URL");
+    if (!reviewedDateRe.test(text)) missingOfferingFields.push("確認日");
+
+    if (missingOfferingFields.some((field) => ["公募期間・締切", "実施機関", "公式URL"].includes(field))) {
+      addFatal(`具体的な公募名・制度名の記事として、${missingOfferingFields.join("、")}が不足しています。`);
+      addScoreCap(69, "具体的な公募名・制度名に必要な実施機関・公募期間・公式URLが不足しています。");
+    }
+  }
+
+  if (fsTitleRe.test(`${title} ${text}`) && equipmentCenteredRe.test(text) && !fsDetailRe.test(text)) {
+    addFatal("FS調査事業の記事なのに、本文が設備導入・購入中心の説明になっています。");
+    addScoreCap(49, "FS調査事業と本文内容がズレています。");
+  }
+
+  if ((definiteNumberRe.test(text) || (moneyOrRateRe.test(text) && yearPromiseRe.test(text))) && !hasOfficialRoute) {
+    addFatal("未確認の補助率・上限額・年度情報を確定情報として書いている可能性があります。");
+    addScoreCap(39, "未確認の補助率・上限額・年度情報を断定しています。");
+  }
+
+  const highScoreRequirementsMet =
+    compactTextLength >= 3000 &&
+    targetRe.test(text) &&
+    expenseRe.test(text) &&
+    excludedExpenseRe.test(text) &&
+    projectRe.test(text) &&
+    preContractRe.test(text) &&
+    hasOfficialRoute &&
+    ehimeContextRe.test(text) &&
+    hasTable(content) &&
+    hasChecklist(content) &&
+    internalLinks > 0 &&
+    ctaRe.test(text) &&
+    !managementMemoRe.test(content) &&
+    !((definiteNumberRe.test(text) || moneyOrRateRe.test(text)) && !hasOfficialRoute);
+
+  if (!highScoreRequirementsMet) {
+    addScoreCap(89, "90点以上に必要な強条件をすべて満たしていません。");
+  }
+
+  const baseScore = Math.max(0, Math.min(100, 100 - fatalIssues.length * 12 - warnings.length * 4));
+  const hardScoreCap = scoreCapValues.length ? Math.min(...scoreCapValues) : 100;
+  const qualityScore = Math.min(baseScore, hardScoreCap);
+
+  return {
+    qualityScore,
+    ruleBasedScore: qualityScore,
+    grade: gradeFromScore(qualityScore),
+    fatalIssues: Array.from(new Set(fatalIssues)),
+    warnings: Array.from(new Set(warnings)),
+    strengths: Array.from(new Set(strengths)),
+    improvementSuggestions: Array.from(new Set(improvementSuggestions)),
+    scoreCapsApplied: Array.from(new Set(scoreCapsApplied)),
+    llmReview: defaultLlmReview(),
+    shouldRegenerate: fatalIssues.length > 0 || qualityScore < 80,
+    shouldHumanReview: true,
+  };
+};
+
+const mergeQualityReviews = (
+  aiReview: ArticleQualityReview | null,
+  machineReview: ArticleQualityReview
+): ArticleQualityReview => {
+  if (!aiReview) return machineReview;
+
+  const fatalIssues = Array.from(new Set([...aiReview.fatalIssues, ...machineReview.fatalIssues]));
+  const warnings = Array.from(new Set([...aiReview.warnings, ...machineReview.warnings]));
+  const scoreCapsApplied = Array.from(new Set([...aiReview.scoreCapsApplied, ...machineReview.scoreCapsApplied]));
+  const scoreCap = scoreCapsApplied.length
+    ? Math.min(...scoreCapsApplied.map(extractScoreCap))
+    : 100;
+  const qualityScore = Math.min(aiReview.qualityScore, machineReview.qualityScore, scoreCap);
+  const llmReview = aiReview.llmReview.usedApi || aiReview.llmReview.enabled
+    ? aiReview.llmReview
+    : machineReview.llmReview;
+
+  return {
+    qualityScore,
+    ruleBasedScore: machineReview.ruleBasedScore,
+    grade: gradeFromScore(qualityScore),
+    fatalIssues,
+    warnings,
+    strengths: Array.from(new Set([...aiReview.strengths, ...machineReview.strengths])),
+    improvementSuggestions: Array.from(new Set([...aiReview.improvementSuggestions, ...machineReview.improvementSuggestions])),
+    scoreCapsApplied,
+    llmReview,
+    shouldRegenerate: aiReview.shouldRegenerate || machineReview.shouldRegenerate || fatalIssues.length > 0 || qualityScore < 80,
+    shouldHumanReview: true,
+  };
+};
+
+type LlmReviewPayload = {
+  llmReview: LlmQualityReview;
+  fatalIssues: string[];
+  warnings: string[];
+  strengths: string[];
+  improvementSuggestions: string[];
+};
+
+const normalizeLlmReviewPayload = (value: unknown): LlmReviewPayload => {
+  if (!value || typeof value !== "object") {
+    return {
+      llmReview: defaultLlmReview(),
+      fatalIssues: [],
+      warnings: [],
+      strengths: [],
+      improvementSuggestions: [],
+    };
+  }
+
+  const review = value as Record<string, unknown>;
+  return {
+    llmReview: defaultLlmReview({
+      enabled: true,
+      usedApi: true,
+      semanticScore: clampScore(review.semanticScore),
+      titleBodyAlignment: toText(review.titleBodyAlignment),
+      factualRisk: toText(review.factualRisk),
+      searchIntentFit: toText(review.searchIntentFit),
+      reviewerComments: uniqueStrings(review.reviewerComments),
+    }),
+    fatalIssues: uniqueStrings(review.fatalIssues),
+    warnings: uniqueStrings(review.warnings),
+    strengths: uniqueStrings(review.strengths),
+    improvementSuggestions: uniqueStrings(review.improvementSuggestions),
+  };
+};
+
+const mergeRuleAndLlmReview = (
+  ruleReview: ArticleQualityReview,
+  llmPayload: LlmReviewPayload
+): ArticleQualityReview => {
+  const fatalIssues = Array.from(new Set([...ruleReview.fatalIssues, ...llmPayload.fatalIssues]));
+  const warnings = Array.from(new Set([...ruleReview.warnings, ...llmPayload.warnings]));
+  const semanticScore = llmPayload.llmReview.usedApi && llmPayload.llmReview.semanticScore > 0
+    ? llmPayload.llmReview.semanticScore
+    : 100;
+  const scoreCap = ruleReview.scoreCapsApplied.length
+    ? Math.min(...ruleReview.scoreCapsApplied.map(extractScoreCap))
+    : 100;
+  const qualityScore = Math.min(ruleReview.ruleBasedScore, semanticScore, scoreCap);
+
+  return {
+    qualityScore,
+    ruleBasedScore: ruleReview.ruleBasedScore,
+    grade: gradeFromScore(qualityScore),
+    fatalIssues,
+    warnings,
+    strengths: Array.from(new Set([...ruleReview.strengths, ...llmPayload.strengths])),
+    improvementSuggestions: Array.from(new Set([
+      ...ruleReview.improvementSuggestions,
+      ...llmPayload.improvementSuggestions,
+    ])),
+    scoreCapsApplied: ruleReview.scoreCapsApplied,
+    llmReview: llmPayload.llmReview,
+    shouldRegenerate: fatalIssues.length > 0 || qualityScore < 80,
+    shouldHumanReview: true,
+  };
+};
+
+const runLlmQualityReview = async ({
+  openAiKey,
+  articleData,
+  articleType,
+}: {
+  openAiKey: string;
+  articleData: { title?: string; seo_title?: string; content?: string; category?: string };
+  articleType: string;
+}): Promise<LlmReviewPayload> => {
+  const reviewModel = Deno.env.get("OPENAI_QUALITY_REVIEW_MODEL")?.trim() || "gpt-4o-mini";
+  const articleText = stripHtml(articleData.content || "").slice(0, 12000);
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openAiKey}`,
+    },
+    body: JSON.stringify({
+      model: reviewModel,
+      temperature: 0.2,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "column_quality_semantic_review",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              semanticScore: { type: "number" },
+              titleBodyAlignment: { type: "string" },
+              factualRisk: { type: "string" },
+              searchIntentFit: { type: "string" },
+              reviewerComments: { type: "array", items: { type: "string" } },
+              fatalIssues: { type: "array", items: { type: "string" } },
+              warnings: { type: "array", items: { type: "string" } },
+              strengths: { type: "array", items: { type: "string" } },
+              improvementSuggestions: { type: "array", items: { type: "string" } },
+            },
+            required: [
+              "semanticScore",
+              "titleBodyAlignment",
+              "factualRisk",
+              "searchIntentFit",
+              "reviewerComments",
+              "fatalIssues",
+              "warnings",
+              "strengths",
+              "improvementSuggestions",
+            ],
+            additionalProperties: false,
+          },
+        },
+      },
+      messages: [
+        {
+          role: "system",
+          content: `
+あなたは、えひめ補助金ポータルの公開前品質レビュー担当です。
+本文を書き換えず、管理画面用のレビューだけを返してください。
+
+評価する観点:
+- 検索意図との一致
+- タイトルと本文の整合性
+- 制度内容との整合性
+- FS調査事業なのに設備導入費の記事になっていないか
+- 公式情報の扱いが安全か
+- 補助率・上限額・年度・締切などを根拠なく断定していないか
+- 対象者・対象経費・対象外経費が具体的か
+- 愛媛県内の事業者向けの地域性があるか
+- SEO記事として読み応えがあるか
+- 管理用メモが混入していないか
+
+semanticScore は0〜100の整数です。公開前に人間確認すべきリスクがあれば fatalIssues または warnings に入れてください。
+`.trim(),
+        },
+        {
+          role: "user",
+          content: `
+記事種別: ${articleType}
+カテゴリ: ${articleData.category || ""}
+タイトル: ${articleData.title || articleData.seo_title || ""}
+
+本文:
+${articleText}
+`.trim(),
+        },
+      ],
+    }),
+  });
+
+  const json = await response.json();
+
+  if (!response.ok) {
+    throw new Error(json?.error?.message || "LLM品質レビューに失敗しました。");
+  }
+
+  const rawContent = json?.choices?.[0]?.message?.content;
+  if (!rawContent) throw new Error("LLM品質レビューの結果が空です。");
+
+  return normalizeLlmReviewPayload(JSON.parse(rawContent));
+};
+
+const buildArticleQualityWarnings = (review: ArticleQualityReview) => {
+  return [...review.fatalIssues, ...review.warnings];
 };
 
 const toText = (value: unknown) =>
@@ -327,10 +859,78 @@ serve(async (req: Request) => {
         ? body.extraInstructions.trim()
         : "";
     const imageOnly = body?.imageOnly === true;
+    const qualityReviewOnly = body?.qualityReviewOnly === true;
+    const useLlmReview = body?.useLlmReview === true;
+    const confirmUsePaidApi = body?.confirmUsePaidApi === true;
     const thumbnailText =
       typeof body?.thumbnailText === "string" ? body.thumbnailText.trim() : "";
     const contentText =
       typeof body?.content === "string" ? body.content.trim() : "";
+
+    if (qualityReviewOnly) {
+      const reviewArticleData = {
+        title,
+        seo_title: typeof body?.seo_title === "string" ? body.seo_title.trim() : "",
+        content: contentText,
+        category: preferredCategory,
+      };
+      const ruleReview = buildMachineQualityReview(reviewArticleData, articleType);
+
+      if (!useLlmReview) {
+        return jsonResponse({
+          articleQualityReview: ruleReview,
+          articleQualityWarnings: buildArticleQualityWarnings(ruleReview),
+          usedApi: false,
+        });
+      }
+
+      if (!confirmUsePaidApi) {
+        return jsonResponse({
+          error: "LLM品質レビューを実行するには、confirmUsePaidApi を true にしてください。",
+          articleQualityReview: {
+            ...ruleReview,
+            llmReview: defaultLlmReview({
+              enabled: true,
+              usedApi: false,
+              reviewerComments: ["APIレビューは確認フラグがないため未実行です。"],
+            }),
+          },
+          articleQualityWarnings: buildArticleQualityWarnings(ruleReview),
+          usedApi: false,
+        });
+      }
+
+      const reviewOpenAiKey = Deno.env.get("OPENAI_API_KEY");
+
+      if (!reviewOpenAiKey) {
+        return jsonResponse({
+          error: "Supabase Secrets に OPENAI_API_KEY が設定されていないため、LLM品質レビューは実行できません。",
+          articleQualityReview: {
+            ...ruleReview,
+            llmReview: defaultLlmReview({
+              enabled: true,
+              usedApi: false,
+              reviewerComments: ["APIキー未設定のため、ルールベース採点のみ実行しました。"],
+            }),
+          },
+          articleQualityWarnings: buildArticleQualityWarnings(ruleReview),
+          usedApi: false,
+        });
+      }
+
+      const llmPayload = await runLlmQualityReview({
+        openAiKey: reviewOpenAiKey,
+        articleData: reviewArticleData,
+        articleType,
+      });
+      const articleQualityReview = mergeRuleAndLlmReview(ruleReview, llmPayload);
+
+      return jsonResponse({
+        articleQualityReview,
+        articleQualityWarnings: buildArticleQualityWarnings(articleQualityReview),
+        usedApi: true,
+      });
+    }
 
     if (imageOnly && !title && !thumbnailText && !contentText) {
       return jsonResponse(
@@ -397,27 +997,80 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 【重要ルール】
 - 読者は愛媛県内の事業者です。
 - 公式ページや入力データの要約・言い換えだけで終わらせず、読者が次に判断できる整理を加えてください。
-- 本文は1800〜2200字程度を目安に、対象者・対象経費・補助率・注意点を具体的に整理してください。
+- 通常コラムは最低3,000文字以上、特集記事は5,000文字以上を目安にしてください。
+- H2を8個以上入れてください。
+- 表を最低1つ、できれば2つ以上入れてください。
+- チェックリスト、CTA、内部リンクを本文に自然に入れてください。
+- 対象者、対象経費、対象外になりやすい経費、申請前注意を具体的に書いてください。
+- 申請前に契約・発注・購入・着手しない注意を必ず書いてください。
+- 愛媛県、市町村、商工会議所、商工会、支援機関など愛媛県内の読者向けの視点を入れてください。
 - 文字数稼ぎの一般論、長い前置き、同じ内容の繰り返し、キーワードだけを差し替えた文章は禁止です。
 - 入力データにない日付、受付状況、金額、補助率、採択率、企業名、成功事例、URLを作らないでください。
 - 公式URLが入力データにある場合は、本文中に必ず公式情報へのリンクを入れてください。
 - 公式URLがない場合は、架空URLを作らず「公式ページや自治体窓口で確認」と書いてください。
+- タイトルで「補助率」「上限額」「令和8年度」「2026年」などを約束する場合は、本文に具体的な根拠・対象制度名・公式確認導線を必ず入れてください。
+- 具体的な補助率・上限額・年度を確認できない場合は、タイトルを「確認したい補助金・支援制度」「探し方と申請前の注意点」など安全な表現にしてください。
 - 実在企業の成功事例を断定しないこと。
 - 「必ず採択される」「必ず受給できる」などの断定表現を避けること。
 - 初心者にもわかりやすい日本語にすること。
 - 本文はHTMLで出力すること。
-- 使用してよいHTMLタグは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a> のみ。
-- 本文の最後に、必ず公式情報確認を促す注意書きを入れること。
+- 使用してよいHTMLタグは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <caption> のみ。
+- 本文の最後に、必ず公式情報確認を促す自然な注意書きを入れること。
+- 公開本文に、品質スコア、自己採点、fatalIssues、warnings、shouldRegenerate、管理用メモを混ぜないこと。
+- 「この記事の作成・確認方針」「本文内の外部確認リンク」「本文内に外部リンクがない場合も」という管理文言を本文に出さないこと。
 - 画像プロンプトには「文字を入れない」指定を含めること。
 - 追加指示がある場合は、法令・事実・安全性に反しない範囲で必ず本文に反映すること。
 
 【本文に必ず入れる内容】
+- 冒頭の結論
 - この記事でわかること
 - 対象になる可能性がある人
+- 対象になりやすい経費
+- 対象外・注意が必要な経費
 - 申請前に確認すること
+- 業種別または用途別の見方
+- 愛媛県内での探し方
 - 公式情報の確認先
 - 注意点
+- 内部リンク
+- CTA
 - 愛媛県内の読者が次に取る行動
+- まとめ
+
+【100点満点の品質基準】
+1. 検索意図との一致: 15点。読者が知りたい答えに早く到達し、タイトルと本文がズレていないこと。
+2. 具体性: 15点。対象者、対象経費、対象外、申請前注意が具体的で、「詳しくは公式へ」だけで逃げないこと。
+3. 公式確認・安全性: 15点。公式確認導線、変更可能性、断定回避、未確認数字の抑制があること。
+4. 記事ボリューム: 10点。通常3,000文字以上、特集5,000文字以上を目安にすること。
+5. 愛媛県向けの地域性: 10点。県内事業者、市町村、商工会議所、商工会、支援機関の視点があること。
+6. 読みやすさ: 10点。H2/H3、表、チェックリスト、CTAが自然であること。
+7. SEO内部リンク: 10点。関連検索、特集、シミュレーター、専門家導線につながること。
+8. 独自性・読み応え: 10点。業種別・用途別・経費別の見方と次の行動があること。
+9. NG表現チェック: 5点。断定、管理用メモ、タイトルと本文の不一致がないこと。
+
+【致命的NG】
+- タイトルに補助率・上限額・令和年度・2026年などの具体情報があるのに、本文に具体的な根拠・説明がない
+- 必ず対象になる、必ず受け取れる、必ず使えるなどと断定している
+- 公式確認導線がない
+- 本文が1,500文字未満
+- 表が1つもない
+- 内部リンクが1つもない
+- 対象者・対象経費・注意点が抽象的すぎる
+- 愛媛県・市町村・地域事業者の視点がない
+- 管理用メモが公開本文に出ている
+- 公式情報で確認していない数字を確定情報のように書いている
+- 申請前に契約・発注・購入・着手しない注意がない
+
+【品質レビュー】
+- quality_review は管理画面表示用です。content には絶対に混ぜないでください。
+- qualityScore は0〜100の整数で自己採点してください。
+- ruleBasedScore は qualityScore と同じ整数を入れてください。最終的にはシステム側のルールベース採点で補正します。
+- grade は A / B / C / D のいずれかです。
+- 90点以上: A、80〜89点: B、60〜79点: C、60点未満: D。
+- fatalIssues が1つでもある場合、shouldRegenerate は true、shouldHumanReview は true にしてください。
+- 80点未満は shouldRegenerate true にしてください。
+- scoreCapsApplied は必ず配列で返してください。該当がなければ空配列にしてください。
+- llmReview は別の任意APIレビュー用です。記事生成時は enabled:false、usedApi:false、semanticScore:0、各コメントは「APIレビュー未実行」にしてください。
 
 【出力JSON】
 次のキーだけを持つJSONを返してください。
@@ -431,7 +1084,28 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
   "thumbnail_text": "画像生成用の英語プロンプト。20単語以内。文字・数字なしの絵にする",
   "content": "HTML本文",
   "category": "カテゴリ名",
-  "tags": ["タグ1", "タグ2"]
+  "tags": ["タグ1", "タグ2"],
+  "quality_review": {
+    "qualityScore": 0,
+    "ruleBasedScore": 0,
+    "grade": "A",
+    "fatalIssues": ["致命的NG"],
+    "warnings": ["注意点"],
+    "strengths": ["良い点"],
+    "improvementSuggestions": ["改善提案"],
+    "scoreCapsApplied": ["39点上限: 理由"],
+    "llmReview": {
+      "enabled": false,
+      "usedApi": false,
+      "semanticScore": 0,
+      "titleBodyAlignment": "APIレビュー未実行",
+      "factualRisk": "APIレビュー未実行",
+      "searchIntentFit": "APIレビュー未実行",
+      "reviewerComments": []
+    },
+    "shouldRegenerate": true,
+    "shouldHumanReview": true
+  }
 }
 
 【カテゴリ候補】
@@ -504,6 +1178,75 @@ ${extraInstructionBlock}
                   type: "array",
                   items: { type: "string" },
                 },
+                quality_review: {
+                  type: "object",
+	                  properties: {
+	                    qualityScore: { type: "number" },
+	                    ruleBasedScore: { type: "number" },
+	                    grade: { type: "string", enum: ["A", "B", "C", "D"] },
+	                    fatalIssues: {
+	                      type: "array",
+                      items: { type: "string" },
+                    },
+                    warnings: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    strengths: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+	                    improvementSuggestions: {
+	                      type: "array",
+	                      items: { type: "string" },
+	                    },
+	                    scoreCapsApplied: {
+	                      type: "array",
+	                      items: { type: "string" },
+	                    },
+	                    llmReview: {
+	                      type: "object",
+	                      properties: {
+	                        enabled: { type: "boolean" },
+	                        usedApi: { type: "boolean" },
+	                        semanticScore: { type: "number" },
+	                        titleBodyAlignment: { type: "string" },
+	                        factualRisk: { type: "string" },
+	                        searchIntentFit: { type: "string" },
+	                        reviewerComments: {
+	                          type: "array",
+	                          items: { type: "string" },
+	                        },
+	                      },
+	                      required: [
+	                        "enabled",
+	                        "usedApi",
+	                        "semanticScore",
+	                        "titleBodyAlignment",
+	                        "factualRisk",
+	                        "searchIntentFit",
+	                        "reviewerComments",
+	                      ],
+	                      additionalProperties: false,
+	                    },
+	                    shouldRegenerate: { type: "boolean" },
+	                    shouldHumanReview: { type: "boolean" },
+	                  },
+	                  required: [
+	                    "qualityScore",
+	                    "ruleBasedScore",
+	                    "grade",
+	                    "fatalIssues",
+	                    "warnings",
+	                    "strengths",
+	                    "improvementSuggestions",
+	                    "scoreCapsApplied",
+	                    "llmReview",
+	                    "shouldRegenerate",
+	                    "shouldHumanReview",
+	                  ],
+                  additionalProperties: false,
+                },
               },
               required: [
                 "subsidy_id",
@@ -515,6 +1258,7 @@ ${extraInstructionBlock}
                 "content",
                 "category",
                 "tags",
+                "quality_review",
               ],
               additionalProperties: false,
             },
@@ -565,6 +1309,7 @@ ${extraInstructionBlock}
       content: string;
       category: string;
       tags: string[];
+      quality_review?: ArticleQualityReview;
     };
 
     try {
@@ -591,7 +1336,12 @@ ${extraInstructionBlock}
       articleData.category = preferredCategory;
     }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
-    const articleQualityWarnings = buildArticleQualityWarnings(articleData);
+    const articleQualityReview = mergeQualityReviews(
+      normalizeAiQualityReview(articleData.quality_review),
+      buildMachineQualityReview(articleData, articleType)
+    );
+    articleData.quality_review = articleQualityReview;
+    const articleQualityWarnings = buildArticleQualityWarnings(articleQualityReview);
 
     const { base64Image, imageError, imageUrl, imageDebug } = await generateImage({
       openAiKey,
@@ -607,6 +1357,7 @@ ${extraInstructionBlock}
 
     return jsonResponse({
       articleData,
+      articleQualityReview,
       articleQualityWarnings,
       base64Image,
       imageError,
