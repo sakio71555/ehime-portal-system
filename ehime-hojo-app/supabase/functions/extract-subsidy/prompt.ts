@@ -58,6 +58,9 @@ export const buildPrompt = ({
 - 給付金・支援金では対象経費を無理に作らず、支給条件を payment_conditions_arr に入れる。
 - calculation_method_text には、補助率、床面積、雇用人数、賃借料など金額算定の基準を原文に忠実に入れる。
 - application_methods_arr には提出方法・申請先・必要な事前相談など、本文で確認できる内容だけを入れる。
+- required_documents_arr には申請書、事業計画書、見積書、納税証明書など、公式資料で明記された提出書類だけを入れる。
+- contact_information_arr には公式資料に記載された担当課名、電話番号、メールアドレス、窓口名だけを入れる。
+- 必要書類や問い合わせ先が確認できない場合は推測せず空配列にする。
 - pre_start_rule_text には契約、発注、購入、着手、操業開始などの時期に関する公式記載だけを入れる。見つからなければ空文字にする。
 
 【返却JSON形式】
@@ -82,6 +85,8 @@ export const buildPrompt = ({
     "calculation_method_text": "",
     "payment_conditions_arr": [],
     "application_methods_arr": [],
+    "required_documents_arr": [],
+    "contact_information_arr": [],
     "pre_start_rule_text": "",
     "target_expenses_arr": [],
     "target_entities_arr": [],
@@ -98,6 +103,8 @@ export const buildPrompt = ({
       "calculation_method_text": "",
       "payment_conditions_arr": "",
       "application_methods_arr": "",
+      "required_documents_arr": "",
+      "contact_information_arr": "",
       "pre_start_rule_text": "",
       "official_url": ""
     }

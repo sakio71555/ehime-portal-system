@@ -275,6 +275,8 @@ const postProcessFacts = ({
   facts.eligibility_conditions_arr = toStringArray(facts.eligibility_conditions_arr);
   facts.payment_conditions_arr = toStringArray(facts.payment_conditions_arr);
   facts.application_methods_arr = toStringArray(facts.application_methods_arr);
+  facts.required_documents_arr = toStringArray(facts.required_documents_arr);
+  facts.contact_information_arr = toStringArray(facts.contact_information_arr);
   facts.calculation_method_text = String(facts.calculation_method_text || "").trim();
   facts.pre_start_rule_text = String(facts.pre_start_rule_text || "").trim();
 
@@ -297,6 +299,12 @@ const postProcessFacts = ({
   }
   if (facts.application_methods_arr.length > 0) {
     evidence.application_methods_arr = facts.application_methods_arr.join(" / ");
+  }
+  if (facts.required_documents_arr.length > 0) {
+    evidence.required_documents_arr = facts.required_documents_arr.join(" / ");
+  }
+  if (facts.contact_information_arr.length > 0) {
+    evidence.contact_information_arr = facts.contact_information_arr.join(" / ");
   }
   if (facts.pre_start_rule_text) {
     evidence.pre_start_rule_text = facts.pre_start_rule_text;

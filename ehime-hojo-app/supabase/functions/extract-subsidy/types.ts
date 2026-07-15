@@ -23,6 +23,8 @@ export type ExtractFacts = {
   calculation_method_text?: string;
   payment_conditions_arr?: string[];
   application_methods_arr?: string[];
+  required_documents_arr?: string[];
+  contact_information_arr?: string[];
   pre_start_rule_text?: string;
 
   target_expenses_arr?: string[];

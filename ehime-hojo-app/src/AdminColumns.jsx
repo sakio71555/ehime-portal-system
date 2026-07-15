@@ -31,7 +31,108 @@ const scoreSubsidyForColumn = (subsidy = {}) =>
 const getCandidateOfficialUrl = (subsidy = {}) =>
   String(subsidy.official_url || subsidy.source_url || '').trim();
 
-const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl }) => {
+const extractOfficialDocumentUrls = (officialText = '', resolvedUrl = '') =>
+  Array.from(
+    new Set([
+      String(resolvedUrl || '').trim(),
+      ...Array.from(String(officialText || '').matchAll(/資料URL:\s*(https?:\/\/[^\s]+)/g)).map(
+        (match) => match[1].trim()
+      ),
+    ].filter((url) => /^https?:\/\//i.test(url)))
+  ).slice(0, 6);
+
+const getOfficialDocumentLabel = (url = '', index = 0, title = '') => {
+  if (index === 0 && title) return title;
+  try {
+    const pathname = new URL(url).pathname;
+    const fileName = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+    return fileName || `公式資料 ${index + 1}`;
+  } catch {
+    return `公式資料 ${index + 1}`;
+  }
+};
+
+const getOfficialDocumentEvidence = (officialText = '', url = '', fallback = '') => {
+  const block = String(officialText || '')
+    .split(/(?=【公式資料\s+\d+】)/)
+    .find((part) => part.includes(url));
+  return [fallback, block ? block.slice(0, 3500) : ''].filter(Boolean).join('\n').slice(0, 12000);
+};
+
+const parseOfficialCheckedAt = (value = '') => {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/年|\//g, '-')
+    .replace(/月/g, '-')
+    .replace(/日/g, '')
+    .replace(/-+/g, '-');
+  const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!match) return null;
+  const checkedAt = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(checkedAt.getTime()) ? null : checkedAt;
+};
+
+const getOfficialSourceFreshness = (sources = []) => {
+  const dates = sources
+    .map((source) => parseOfficialCheckedAt(source?.checkedAt))
+    .filter(Boolean)
+    .sort((left, right) => right.getTime() - left.getTime());
+  if (!dates.length) return { days: null, status: 'unknown', label: '確認日未記載' };
+
+  const days = Math.max(0, Math.floor((Date.now() - dates[0].getTime()) / 86400000));
+  if (days > 60) return { days, status: 'stale', label: `公式確認から${days}日経過` };
+  if (days > 30) return { days, status: 'aging', label: `公式確認から${days}日経過` };
+  return { days, status: 'fresh', label: `公式確認から${days}日` };
+};
+
+const normalizeArticleForSimilarity = (content = '') =>
+  stripHtmlToText(content)
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[\s。、，．・：:；;「」『』（）()【】!?！？_/-]/g, '')
+    .replace(/\[|\]/g, '')
+    .slice(0, 12000);
+
+const buildArticleShingles = (content = '', size = 14) => {
+  const normalized = normalizeArticleForSimilarity(content);
+  const shingles = new Set();
+  for (let index = 0; index <= normalized.length - size; index += 2) {
+    shingles.add(normalized.slice(index, index + size));
+  }
+  return shingles;
+};
+
+const calculateArticleSimilarity = (left = '', right = '') => {
+  const leftShingles = buildArticleShingles(left);
+  const rightShingles = buildArticleShingles(right);
+  if (!leftShingles.size || !rightShingles.size) return 0;
+
+  let intersection = 0;
+  const smaller = leftShingles.size <= rightShingles.size ? leftShingles : rightShingles;
+  const larger = smaller === leftShingles ? rightShingles : leftShingles;
+  smaller.forEach((shingle) => {
+    if (larger.has(shingle)) intersection += 1;
+  });
+  return intersection / (leftShingles.size + rightShingles.size - intersection);
+};
+
+const findMostSimilarColumn = (editingColumn = {}, columns = []) => {
+  const contentLength = stripHtmlToText(editingColumn.content || '').length;
+  if (contentLength < 1200) return null;
+
+  return columns
+    .filter((column) => column.id !== editingColumn.id)
+    .filter((column) => stripHtmlToText(column.content || '').length >= 1200)
+    .map((column) => ({
+      id: column.id,
+      title: column.title || 'タイトル未設定',
+      score: calculateArticleSimilarity(editingColumn.content || '', column.content || ''),
+    }))
+    .sort((left, right) => right.score - left.score)[0] || null;
+};
+
+const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl, officialText = '' }) => {
   const checkedAt = new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
@@ -66,11 +167,19 @@ const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl }) 
     extractedFacts.evidence?.application_methods_arr
       ? `申請方法: ${extractedFacts.evidence.application_methods_arr}`
       : '',
+    extractedFacts.evidence?.required_documents_arr
+      ? `必要書類: ${extractedFacts.evidence.required_documents_arr}`
+      : '',
+    extractedFacts.evidence?.contact_information_arr
+      ? `問い合わせ先: ${extractedFacts.evidence.contact_information_arr}`
+      : '',
     extractedFacts.evidence?.pre_start_rule_text
       ? `着手時期: ${extractedFacts.evidence.pre_start_rule_text}`
       : '',
   ].filter(Boolean);
   const officialUrl = resolvedUrl || extractedFacts.official_url || getCandidateOfficialUrl(subsidy);
+  const officialDocumentUrls = extractOfficialDocumentUrls(officialText, officialUrl);
+  const combinedEvidence = evidenceParts.join('\n');
 
   return {
     articleType: 'single_program',
@@ -103,6 +212,12 @@ const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl }) 
     applicationMethods: Array.isArray(extractedFacts.application_methods_arr)
       ? extractedFacts.application_methods_arr
       : [],
+    requiredDocuments: Array.isArray(extractedFacts.required_documents_arr)
+      ? extractedFacts.required_documents_arr
+      : [],
+    contactInformation: Array.isArray(extractedFacts.contact_information_arr)
+      ? extractedFacts.contact_information_arr
+      : [],
     projectPeriod: '',
     preStartRule: {
       confirmed: Boolean(extractedFacts.pre_start_rule_text),
@@ -110,17 +225,17 @@ const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl }) 
       safeDescription: extractedFacts.pre_start_rule_text || '',
       sourceId: extractedFacts.pre_start_rule_text ? 'source-1' : '',
     },
-    officialSources: officialUrl
-      ? [
-          {
-            id: 'source-1',
-            label: extractedFacts.title || subsidy.title || '公式情報',
-            url: officialUrl,
-            checkedAt,
-            evidence: evidenceParts.join('\n').slice(0, 12000),
-          },
-        ]
-      : [],
+    officialSources: officialDocumentUrls.map((url, index) => ({
+      id: `source-${index + 1}`,
+      label: getOfficialDocumentLabel(
+        url,
+        index,
+        extractedFacts.title || subsidy.title || '公式情報'
+      ),
+      url,
+      checkedAt,
+      evidence: getOfficialDocumentEvidence(officialText, url, combinedEvidence),
+    })),
     unknownFields: [],
   };
 };
@@ -272,55 +387,18 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         officialText.slice(0, 14000),
         '【公式取得データここまで】',
       ].join('\n');
-      const extractedEvidence = [
-        extractedFacts.evidence?.application_period_text,
-        extractedFacts.evidence?.amount_text,
-        extractedFacts.evidence?.subsidy_rate_text,
-        extractedFacts.evidence?.target_entities_arr,
-        extractedFacts.evidence?.target_expenses_arr,
-        extractedFacts.summary,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .slice(0, 1600);
       const extractedSourceFacts = {
-        articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'single_program',
-        officialName: extractedFacts.title || editingColumn.title || '',
-        fiscalYear: extractedFacts.fiscal_year || '',
-        applicationRound: '',
-        administeringBody: extractedFacts.organization || '',
-        supervisingBody: '',
-        applicationStart: extractedFacts.application_start_date || '',
-        applicationDeadline:
-          extractedFacts.application_period_text || extractedFacts.application_end_date || '',
-        subsidyRate: extractedFacts.subsidy_rate_text || '',
-        subsidyCap: extractedFacts.amount_text || '',
-        eligibleApplicants: Array.isArray(extractedFacts.target_entities_arr)
-          ? extractedFacts.target_entities_arr
-          : [],
-        eligibleProjects: [],
-        eligibleExpenses: Array.isArray(extractedFacts.target_expenses_arr)
-          ? extractedFacts.target_expenses_arr
-          : [],
-        ineligibleExpenses: [],
-        applicationMethods: [],
-        projectPeriod: '',
-        preStartRule: {
-          confirmed: false,
-          allowedFrom: '',
-          safeDescription: '',
-          sourceId: '',
-        },
-        officialSources: [
-          {
-            id: 'source-1',
-            label: extractedFacts.title || editingColumn.title || '公式情報',
-            url: extractedFacts.official_url || resolvedUrl,
-            checkedAt,
-            evidence: extractedEvidence || officialText.slice(0, 1600),
+        ...buildExtractedCandidateFacts({
+          subsidy: {
+            title: editingColumn.title || '',
+            organization: extractedFacts.organization || '',
+            official_url: sourceUrl,
           },
-        ],
-        unknownFields: [],
+          extractedFacts,
+          resolvedUrl,
+          officialText,
+        }),
+        articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'single_program',
       };
 
       setEditingColumn((prev) => ({
@@ -953,6 +1031,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
             subsidy,
             extractedFacts: extractedData?.facts || {},
             resolvedUrl,
+            officialText,
           });
           const readiness = getColumnFactReadiness(sourceFacts, {
             title: subsidy.title || '',
@@ -1269,6 +1348,26 @@ export default function AdminColumns({ initialMode = 'columns' }) {
       sourceText: editingColumn.ai_instructions || '',
       humanReviewed: getColumnHumanReviewed(editingColumn),
     });
+    const humanReviewed = getColumnHumanReviewed(editingColumn);
+    const sourceFreshness = getOfficialSourceFreshness(qualityReview.sourceFacts?.officialSources || []);
+    const similarityCheck = findMostSimilarColumn(editingColumn, columns);
+    const similarityPercent = similarityCheck ? Math.round(similarityCheck.score * 100) : 0;
+    const qualityPassesWithoutHumanReview =
+      qualityReview.qualityScore >= 90 &&
+      qualityReview.fatalIssues.length === 0 &&
+      (qualityReview.unsupportedClaims || []).length === 0 &&
+      (qualityReview.contradictoryClaims || []).length === 0 &&
+      !qualityReview.titleNeedsRewrite &&
+      hasUsableOfficialSource(qualityReview.sourceFacts);
+
+    if (editingColumn.is_published && !humanReviewed && qualityPassesWithoutHumanReview) {
+      alert(
+        `記事品質は公開基準を満たしていますが、人間確認が未完了です。\n\n` +
+          `公式URL・制度名・実施機関・補助率・上限額・申請期間を目視確認し、` +
+          `「人間確認済み」にチェックしてから、もう一度保存してください。`
+      );
+      return;
+    }
 
     const hardBlockReasons = [
       ...(qualityReview.fatalIssues || []),
@@ -1297,6 +1396,13 @@ export default function AdminColumns({ initialMode = 'columns' }) {
       ...(qualityReview.warnings || []),
       ...(qualityReview.missingFacts || []).map((field) => `公式ファクト不足: ${field}`),
       ...(qualityReview.llmReview?.usedApi ? [] : ['API品質レビューが未実行です。']),
+      ...(sourceFreshness.status === 'stale'
+        ? [`公式情報の確認から${sourceFreshness.days}日経過しています。再取得してください。`]
+        : []),
+      ...(sourceFreshness.status === 'unknown' ? ['公式情報の確認日が記録されていません。'] : []),
+      ...(similarityPercent >= 72
+        ? [`既存記事「${similarityCheck.title}」との本文類似度が${similarityPercent}%です。制度固有の情報を追加してください。`]
+        : []),
       ...(qualityReview.publishAllowed ? [] : ['公開可能判定ではありません。']),
     ];
 
@@ -1325,7 +1431,18 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         thumbnail_url: editingColumn.thumbnail_url,
         thumbnail_text: editingColumn.thumbnail_text || '',
         tags: editingColumn.tags || [],
-        quality_review: qualityReview,
+        quality_review: {
+          ...qualityReview,
+          sourceFreshness,
+          similarityCheck: similarityCheck
+            ? {
+                columnId: similarityCheck.id,
+                title: similarityCheck.title,
+                score: similarityCheck.score,
+                checkedAt: new Date().toISOString(),
+              }
+            : null,
+        },
       };
 
       if (editingColumn.id) {
@@ -1385,6 +1502,8 @@ export default function AdminColumns({ initialMode = 'columns' }) {
     : null;
   const editingSourceFacts = editingColumn ? buildSourceFactsForColumn(editingColumn) : null;
   const editingHasOfficialSource = hasUsableOfficialSource(editingSourceFacts);
+  const editingSourceFreshness = getOfficialSourceFreshness(editingSourceFacts?.officialSources || []);
+  const editingSimilarity = editingColumn ? findMostSimilarColumn(editingColumn, columns) : null;
   const canRunLlmReview = Boolean(
     editingQualityReview &&
       editingQualityReview.ruleBasedScore >= 80 &&
@@ -1554,7 +1673,9 @@ export default function AdminColumns({ initialMode = 'columns' }) {
                     ['補助率', editingSourceFacts?.subsidyRate],
                     ['上限額', editingSourceFacts?.subsidyCap],
                     ['締切', editingSourceFacts?.applicationDeadline],
-                    ['公式資料', editingSourceFacts?.officialSources?.[0]?.label],
+                    ['必要書類', editingSourceFacts?.requiredDocuments?.join(' / ')],
+                    ['問い合わせ先', editingSourceFacts?.contactInformation?.join(' / ')],
+                    ['公式資料', editingSourceFacts?.officialSources?.length ? `${editingSourceFacts.officialSources.length}件` : ''],
                   ].map(([label, value]) => (
                     <div key={label} style={{ padding: '8px 10px', borderRadius: '6px', backgroundColor: 'white', border: '1px solid #e2e8f0', color: '#334155', fontSize: '12px', lineHeight: 1.5, minWidth: 0, overflowWrap: 'break-word' }}>
                       <strong style={{ display: 'block', color: '#64748b', marginBottom: '2px' }}>{label}</strong>
@@ -1562,6 +1683,42 @@ export default function AdminColumns({ initialMode = 'columns' }) {
                     </div>
                   ))}
                 </div>
+
+                {editingSourceFacts?.officialSources?.length > 0 && (
+                  <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '6px', backgroundColor: 'white', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                      <strong style={{ color: '#334155', fontSize: '13px' }}>確認した公式資料</strong>
+                      <span
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '999px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: editingSourceFreshness.status === 'stale' ? '#b91c1c' : editingSourceFreshness.status === 'aging' ? '#92400e' : '#047857',
+                          backgroundColor: editingSourceFreshness.status === 'stale' ? '#fef2f2' : editingSourceFreshness.status === 'aging' ? '#fffbeb' : '#ecfdf5',
+                        }}
+                      >
+                        {editingSourceFreshness.label}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gap: '8px' }}>
+                      {editingSourceFacts.officialSources.map((source, index) => (
+                        <details key={`${source.id || index}-${source.url}`} style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
+                          <summary style={{ cursor: 'pointer', color: '#0f766e', fontSize: '12px', fontWeight: 'bold', overflowWrap: 'anywhere' }}>
+                            {index + 1}. {source.label || source.url}
+                            {source.checkedAt ? `（確認日: ${source.checkedAt}）` : ''}
+                          </summary>
+                          <a href={source.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: '8px', color: '#2563eb', fontSize: '12px', overflowWrap: 'anywhere' }}>
+                            {source.url}
+                          </a>
+                          <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '11px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                            {source.evidence || '根拠メモなし'}
+                          </p>
+                        </details>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <label style={{ display: 'block', fontSize: '13px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>
                   AI下書きに入れる公式情報・確認メモ（必須）
@@ -1767,6 +1924,19 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 	                    >
 	                      {isRepairingArticle ? '修正生成中...' : '指摘を反映して修正生成'}
 	                    </button>
+	                  </div>
+	                </div>
+	                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+	                  <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: editingSourceFreshness.status === 'stale' ? '#fef2f2' : '#ffffff', border: `1px solid ${editingSourceFreshness.status === 'stale' ? '#fecaca' : '#d1fae5'}`, color: editingSourceFreshness.status === 'stale' ? '#b91c1c' : '#166534', fontSize: '12px', lineHeight: 1.6 }}>
+	                    <strong>公式情報の鮮度:</strong> {editingSourceFreshness.label}
+	                    {editingSourceFreshness.status === 'stale' && <span style={{ display: 'block' }}>公開前に公式情報を再取得してください。</span>}
+	                  </div>
+	                  <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: editingSimilarity?.score >= 0.72 ? '#fff7ed' : '#ffffff', border: `1px solid ${editingSimilarity?.score >= 0.72 ? '#fed7aa' : '#d1fae5'}`, color: editingSimilarity?.score >= 0.72 ? '#9a3412' : '#166534', fontSize: '12px', lineHeight: 1.6 }}>
+	                    <strong>記事間の類似度:</strong>{' '}
+	                    {editingSimilarity
+	                      ? `${Math.round(editingSimilarity.score * 100)}%（比較先: ${editingSimilarity.title}）`
+	                      : '比較対象なし'}
+	                    {editingSimilarity?.score >= 0.72 && <span style={{ display: 'block' }}>制度固有の申請手順・必要書類・注意点を追加してください。</span>}
 	                  </div>
 	                </div>
 	                <ul style={{ margin: 0, paddingLeft: '20px', color: '#365c45', fontSize: '12px', lineHeight: 1.7 }}>

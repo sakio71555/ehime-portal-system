@@ -82,6 +82,8 @@ type SourceFacts = {
   calculationMethod: string;
   paymentConditions: string[];
   applicationMethods: string[];
+  requiredDocuments: string[];
+  contactInformation: string[];
   projectPeriod: string;
   preStartRule: {
     confirmed: boolean;
@@ -361,6 +363,14 @@ const buildFactGroundedArticle = (sourceFacts: SourceFacts) => {
     sourceFacts.applicationMethods,
     "申請方法と提出書類は、公式ページ・公募要領で確認が必要です。"
   );
+  const requiredDocuments = factListText(
+    sourceFacts.requiredDocuments,
+    "必要書類の詳細は構造化済み公式ファクトに含まれていないため、最新の公募要領・申請様式で確認が必要です。"
+  );
+  const contactInformation = factListText(
+    sourceFacts.contactInformation,
+    `${body}の公式ページに記載された担当窓口で確認が必要です。`
+  );
   const applicationPeriod = escapeHtml(
     sourceFacts.applicationDeadline || "申請期間・締切は公式ページで確認が必要です。"
   );
@@ -383,6 +393,15 @@ const buildFactGroundedArticle = (sourceFacts: SourceFacts) => {
   const officialLink = officialUrl
     ? `<a href="${officialUrl}">${body}の公式情報を確認する</a>`
     : `${body}の公式ページ・担当窓口で確認してください。`;
+  const officialSourceLinks = sourceFacts.officialSources
+    .filter((source) => /^https?:\/\//i.test(source.url))
+    .map((source, index) => {
+      const sourceUrl = escapeHtml(source.url);
+      const sourceLabel = escapeHtml(source.label || `公式資料 ${index + 1}`);
+      const sourceCheckedAt = escapeHtml(source.checkedAt || "確認日未記載");
+      return `<li><a href="${sourceUrl}">${sourceLabel}</a>（確認日: ${sourceCheckedAt}）</li>`;
+    })
+    .join("");
   const detailLabel = isSubsidy ? "対象者・対象経費" : "対象者・交付条件";
   const title = `${sourceFacts.officialName || "愛媛県内の支援制度"}の${detailLabel}と申請前の確認ポイント`;
   const metaDescription = `${sourceFacts.officialName || "愛媛県内の支援制度"}について、対象者、${isSubsidy ? "対象経費、補助率・上限額" : "交付条件、算定方法"}、申請期間、申請前の注意点を公式情報に基づいて整理します。`;
@@ -409,6 +428,7 @@ const buildFactGroundedArticle = (sourceFacts: SourceFacts) => {
 </tbody></table>
 <p>表に記載した内容は要点です。対象者の定義、対象期間、申請単位、他制度との併用、提出方法などは、別紙や交付要綱に記載されていることがあります。自社に関係する条件を抜き出し、公式資料の該当箇所と照合できる状態にしてから申請準備へ進むと、読み違いを減らせます。</p>
 <p>公式資料が複数ある場合は、制度紹介ページだけでなく、公募要領、交付要綱、別表、申請様式、記載例も確認します。資料ごとに役割が異なり、概要ページには載っていない条件が別表や様式の注意書きに示されることがあります。資料名と更新日を控え、古い年度の資料と混在していないかを確認してから、自社用の確認メモへ転記してください。</p>
+${officialSourceLinks ? `<p><strong>今回確認した公式資料</strong></p><ul>${officialSourceLinks}</ul>` : ""}
 
 <h2>対象者と対象事業・交付要件を照合する</h2>
 <p>対象者について公式資料から確認できた内容は「${applicants}」です。ここでは、法人・個人事業主などの区分だけでなく、所在地、事業所、事業実績、税の納付状況など、制度ごとに追加条件がないかを確認してください。対象者の文章に複数の条件が並ぶ場合は、いずれか一つではなく、すべて満たす必要があるのかを実施機関へ確認します。</p>
@@ -426,6 +446,10 @@ const buildFactGroundedArticle = (sourceFacts: SourceFacts) => {
 <p>申請期間として確認できた内容は「${applicationPeriod}」です。期間の記載があっても、予算到達による早期終了、事前相談の期限、電子申請と郵送の違いなどが別に定められている場合があります。提出日だけを見るのではなく、準備開始から逆算し、確認・見積取得・書類作成・社内決裁に必要な時間を確保してください。</p>
 <p>申請方法として確認できた内容は「${applicationMethods}」です。提出前には最新版の様式を使っているか、必須欄が埋まっているか、添付資料と本文の数値が一致しているかを確認します。締切直前は問い合わせや電子申請が集中する可能性もあるため、不明点は早めに${body}へ確認してください。</p>
 <p>準備作業は、公式資料の確認、担当窓口への質問、見積や証明資料の収集、申請書の作成、最終照合に分けると管理しやすくなります。質問するときは、確認した資料名と該当箇所、自社の状況、判断できない点を具体的に伝えてください。回答を得た後は、申請書、事業計画、収支計画、添付資料の制度名・金額・期間が互いに一致しているかを改めて確認します。</p>
+
+<h2>申請方法・必要書類・問い合わせ先を整理する</h2>
+<p>公式資料から確認できた申請方法は「${applicationMethods}」、必要書類は「${requiredDocuments}」です。必要書類の名称だけでなく、指定様式か任意様式か、押印や原本が必要か、発行日に条件があるか、電子提出できるかを最新版の公募要領と申請様式で確認してください。資料に記載がない項目は推測で用意せず、提出前に担当窓口へ確認します。</p>
+<p>問い合わせ先として構造化できた内容は「${contactInformation}」です。問い合わせる際は、参照している公式資料名、申請者の区分、予定する取組、確認したい条件を簡潔に整理してください。制度の正式な解釈は実施機関が行うため、第三者の説明だけで申請可否を確定せず、必要に応じて公式窓口の回答を記録します。</p>
 
 <h2>申請前の確認表</h2>
 <p>申請準備では、制度説明を読むだけでなく、自社の計画と公式要件を一項目ずつ対応させることが大切です。次の表を使い、確認できた根拠資料と未確認事項を分けてください。未確認欄が残る場合は、そのまま申請書を書き始めず、公式ページや担当窓口で確認します。</p>
@@ -579,6 +603,8 @@ const createEmptySourceFacts = (articleType: ArticleType = "feature"): SourceFac
   calculationMethod: "",
   paymentConditions: [],
   applicationMethods: [],
+  requiredDocuments: [],
+  contactInformation: [],
   projectPeriod: "",
   preStartRule: {
     confirmed: false,
@@ -662,6 +688,8 @@ const normalizeSourceFacts = (value: unknown): SourceFacts => {
     calculationMethod: textValue(raw.calculationMethod || raw.calculation_method),
     paymentConditions: uniqueTextList(raw.paymentConditions || raw.payment_conditions),
     applicationMethods: uniqueTextList(raw.applicationMethods || raw.application_methods),
+    requiredDocuments: uniqueTextList(raw.requiredDocuments || raw.required_documents),
+    contactInformation: uniqueTextList(raw.contactInformation || raw.contact_information),
     projectPeriod: textValue(raw.projectPeriod || raw.project_period),
     preStartRule: {
       confirmed: Boolean((raw.preStartRule as Record<string, unknown> | undefined)?.confirmed || (raw.pre_start_rule as Record<string, unknown> | undefined)?.confirmed),
@@ -806,6 +834,8 @@ const sourceFactEvidenceText = (facts: SourceFacts) =>
     facts.calculationMethod,
     ...facts.paymentConditions,
     ...facts.applicationMethods,
+    ...facts.requiredDocuments,
+    ...facts.contactInformation,
     facts.projectPeriod,
     facts.preStartRule.safeDescription,
     ...facts.officialSources.map((source) => `${source.label} ${source.url} ${source.checkedAt} ${source.evidence}`),

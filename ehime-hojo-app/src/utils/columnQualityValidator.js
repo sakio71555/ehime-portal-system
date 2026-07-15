@@ -155,6 +155,8 @@ export const PUBLISH_QUALITY_CHECKS = [
   '表、チェックリスト、内部リンク、CTAが入っている',
   '愛媛県内の事業者・個人事業主・市町村の文脈が入っている',
   '申請・契約・発注・購入・着手・操業開始の時期を公式情報で確認する注意がある',
+  '確認した公式資料と確認日を追跡でき、必要書類・問い合わせ先を確認している',
+  '既存記事との類似度を確認し、制度固有の情報を追加している',
   '管理用メモや自己採点が公開本文に混ざっていない',
 ];
 
@@ -372,6 +374,8 @@ export const createEmptySourceFacts = (articleType = 'feature') => ({
   calculationMethod: '',
   paymentConditions: [],
   applicationMethods: [],
+  requiredDocuments: [],
+  contactInformation: [],
   projectPeriod: '',
   preStartRule: {
     confirmed: false,
@@ -439,6 +443,8 @@ const normalizeSourceFacts = (sourceFacts = {}) => {
     calculationMethod: textValue(sourceFacts.calculationMethod || sourceFacts.calculation_method),
     paymentConditions: uniqueList(sourceFacts.paymentConditions || sourceFacts.payment_conditions || []),
     applicationMethods: uniqueList(sourceFacts.applicationMethods || sourceFacts.application_methods || []),
+    requiredDocuments: uniqueList(sourceFacts.requiredDocuments || sourceFacts.required_documents || []),
+    contactInformation: uniqueList(sourceFacts.contactInformation || sourceFacts.contact_information || []),
     projectPeriod: textValue(sourceFacts.projectPeriod || sourceFacts.project_period),
     preStartRule: normalizePreStartRule(sourceFacts.preStartRule || sourceFacts.pre_start_rule || {}),
     officialSources: Array.isArray(sourceFacts.officialSources || sourceFacts.official_sources)
@@ -615,6 +621,8 @@ const sourceFactEvidenceText = (facts = {}) =>
       facts.calculationMethod,
       ...(facts.paymentConditions || []),
       ...(facts.applicationMethods || []),
+      ...(facts.requiredDocuments || []),
+      ...(facts.contactInformation || []),
       facts.projectPeriod,
       facts.preStartRule?.safeDescription,
       ...(facts.officialSources || []).map((source) => `${source.label} ${source.url} ${source.checkedAt} ${source.evidence}`),
