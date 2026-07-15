@@ -309,6 +309,8 @@ const normalizeGeneratedInternalLinks = (content = "") =>
 
 const countH2 = (value: string) => (String(value || "").match(/<h2[\s>]/gi) || []).length;
 
+const countTables = (value: string) => (String(value || "").match(/<table[\s>]/gi) || []).length;
+
 const hasTable = (value: string) => /<table[\s>]|<th[\s>]|<td[\s>]/i.test(value);
 
 const hasChecklist = (value: string) => /チェックリスト|確認リスト|<ul[\s>]|<ol[\s>]/i.test(value);
@@ -338,10 +340,14 @@ const excludedExpenseRe = /(対象外|対象にならない|対象外経費|注�
 const ctaRe = /(相談|診断|探す|確認する|問い合わせ|専門家|シミュレーター|次のステップ|公式ページで確認|補助金を探す|申請前に確認)/;
 const projectRe = /(対象事業|補助対象事業|取り組み|取組|事業内容|対象となる事業|支援対象事業)/;
 const startTimingRe = /(契約|発注|購入|着手).{0,60}(制度ごと|交付決定前|事前着手|公募要領|実施機関|確認)|(?:交付決定前|事前着手届|公募要領).{0,60}(契約|発注|購入|着手|経費)/;
-const industryUnsupportedRe = /(建設業、?製造業、?サービス業|建設業・製造業・サービス業)/;
-const expenseUnsupportedRe = /(新規設備導入費|研修費|調査費)/;
-const excludedUnsupportedRe = /(中古品|人件費).{0,24}(対象外|補助対象外|対象にならない)|(?:対象外|補助対象外).{0,24}(中古品|人件費)/;
+const industryUnsupportedRe =
+  /(建設業、?製造業、?サービス業|建設業・製造業・サービス業|産業廃棄物処理業者|廃棄物処理業者|リサイクル業者)/;
+const expenseUnsupportedRe = /(新規設備導入費|研修費|調査費|設備投資|新技術導入|環境対策費)/;
+const excludedUnsupportedRe =
+  /(中古品|人件費|管理費|着手済み経費).{0,24}(対象外|補助対象外|対象にならない)|(?:対象外|補助対象外).{0,24}(中古品|人件費|管理費|着手済み経費)/;
 const claimNumberRe = /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|申請締切|締切|公募期間|受付期間|令和\s*\d+\s*年度|20\d{2}\s*年).{0,40}?(%|％|円|万円|千円|令和\s*\d+\s*年|20\d{2}[/-]\d{1,2}|20\d{2}年\d{1,2}月|\d{1,3}\s*\/\s*\d{1,3}|\d+\s*割)/g;
+const singleProgramLanguageRe =
+  /(この補助金|この制度|上限額が設定されています|一定の補助率が適用されます|令和\s*\d+\s*年度においても実施されています|20\d{2}\s*年においても実施されています)/;
 
 const articleTypeLabels: Record<ArticleType, string> = {
   single_program: "個別制度記事",
@@ -480,7 +486,9 @@ const hasUsableOfficialSource = (facts: SourceFacts) =>
 
 const getMissingSourceFactFields = (facts: SourceFacts, title = "") => {
   const required = [...(sourceFactRequiredByType[facts.articleType] || sourceFactRequiredByType.feature)];
-  if (facts.articleType === "single_program" || amountPromiseRe.test(title)) required.push("subsidyRate", "subsidyCap");
+  if (facts.articleType === "single_program" || amountPromiseRe.test(title)) {
+    required.push("officialName", "administeringBody", "officialSources", "subsidyRate", "subsidyCap");
+  }
   if (facts.articleType === "single_program" || yearPromiseRe.test(title) || deadlinePromiseRe.test(title)) required.push("applicationDeadline");
   return Array.from(new Set(required.filter((field) => {
     if (field === "officialSources") return !hasUsableOfficialSource(facts);
@@ -581,6 +589,7 @@ const claimSupportedByFacts = (claim: string, sourceFacts: SourceFacts, factsTex
 
   const rate = normalizeClaimText(sourceFacts.subsidyRate);
   const cap = normalizeClaimText(sourceFacts.subsidyCap);
+  const start = normalizeClaimText(sourceFacts.applicationStart);
   const deadline = normalizeClaimText(sourceFacts.applicationDeadline);
 
   if (/補助率/.test(claim) && rate && normalizedClaim.includes(rate)) return true;
@@ -588,6 +597,12 @@ const claimSupportedByFacts = (claim: string, sourceFacts: SourceFacts, factsTex
   if (/(締切|申請締切|公募期間|受付期間)/.test(claim) && deadline) {
     const monthMatch = normalizedClaim.match(/20\d{2}年\d{1,2}月/);
     if (normalizedClaim.includes(deadline) || (monthMatch && deadline.includes(monthMatch[0]))) return true;
+  }
+  if (start || deadline) {
+    const claimMonths = normalizedClaim.match(/20\d{2}年\d{1,2}月/g) || [];
+    const hasStart = Boolean(start && (normalizedClaim.includes(start) || claimMonths.some((month) => start.includes(month))));
+    const hasDeadline = Boolean(deadline && (normalizedClaim.includes(deadline) || claimMonths.some((month) => deadline.includes(month))));
+    if ((start && deadline && hasStart && hasDeadline) || hasDeadline) return true;
   }
   if (rate && cap && normalizedClaim.includes(rate) && normalizedClaim.includes(cap)) return true;
   return false;
@@ -614,14 +629,14 @@ const buildFactualClaims = (title: string, text: string, sourceFacts: SourceFact
   if (amountPromiseRe.test(title) && (!sourceFacts.subsidyRate || !sourceFacts.subsidyCap)) {
     addClaim("タイトルで補助率・上限額を約束しているが、公式ファクトに具体値がありません。", "unsupported", "タイトル安全化が必要です。");
   }
-  if (industryUnsupportedRe.test(text) && !/(建設業|製造業|サービス業)/.test(factsText)) {
-    addClaim("対象業種の根拠がない", "unsupported", "suppliedFacts に建設業・製造業・サービス業の根拠がありません。");
+  if (industryUnsupportedRe.test(text) && !industryUnsupportedRe.test(factsText)) {
+    addClaim("対象者・対象業種の根拠がない", "unsupported", "suppliedFacts に本文の対象者・対象業種を裏付ける根拠がありません。");
   }
-  if (expenseUnsupportedRe.test(text) && !/(新規設備導入費|研修費|調査費)/.test(factsText)) {
-    addClaim("対象経費の根拠がない", "unsupported", "suppliedFacts に新規設備導入費・研修費・調査費の根拠がありません。");
+  if (expenseUnsupportedRe.test(text) && !expenseUnsupportedRe.test(factsText)) {
+    addClaim("対象経費の根拠がない", "unsupported", "suppliedFacts に本文の対象経費を裏付ける根拠がありません。");
   }
-  if (excludedUnsupportedRe.test(text) && !/(中古品|人件費)/.test(factsText)) {
-    addClaim("対象外経費の根拠がない", "unsupported", "suppliedFacts に中古品・人件費を対象外とする根拠がありません。");
+  if (excludedUnsupportedRe.test(text) && !/(中古品|人件費|管理費|着手済み経費)/.test(factsText)) {
+    addClaim("対象外経費の根拠がない", "unsupported", "suppliedFacts に本文の対象外経費を裏付ける根拠がありません。");
   }
 
   return Array.from(new Map(claims.map((claim) => [`${claim.status}:${claim.claim}`, claim])).values());
@@ -648,10 +663,17 @@ const suggestSafeTitles = (title: string, facts: SourceFacts) => {
   if (facts.articleType === "single_program" && facts.officialName) {
     return [`${facts.officialName}の確認ポイント`, `${facts.officialName}の対象者・対象経費と申請前の注意点`];
   }
+  if (/産業廃棄物処理業者|廃棄物処理業者|リサイクル業者/.test(title)) {
+    return Array.from(new Set([
+      "愛媛県で産業廃棄物処理業者が確認したい補助金・支援制度｜設備更新・再資源化・省エネ対策の探し方",
+      "愛媛県の産業廃棄物処理・リサイクル事業者が補助金を探すときの確認ポイント",
+      "産業廃棄物処理業者向け補助金を愛媛県内で探す方法と申請前の注意点",
+    ]));
+  }
   return Array.from(new Set([
-    `${base}の探し方と申請前の注意点`,
-    `${base}で確認したい補助金・支援制度`,
-    `${base}向け補助金の公式情報確認ポイント`,
+    `${base.replace(/向け補助金$/, "向け補助金・支援制度")}の探し方と申請前の注意点`,
+    `${base.replace(/補助金$/, "補助金・支援制度")}で確認したい公式情報`,
+    `${base.replace(/向け$/, "")}向け支援制度の公式情報確認ポイント`,
   ]));
 };
 
@@ -689,6 +711,7 @@ const buildMachineQualityReview = (
   const externalOfficialLinks = countExternalOfficialLinks(content);
   const internalLinks = countInternalLinks(content);
   const invalidInternalLinks = getInvalidInternalLinks(content);
+  const tableCount = countTables(content);
   const hasOfficialRoute = externalOfficialLinks > 0 || officialRe.test(text);
   const hasOfficialEvidence = hasUsableOfficialSource(sourceFacts);
   const missingFacts = getMissingSourceFactFields(sourceFacts, title);
@@ -699,6 +722,11 @@ const buildMachineQualityReview = (
   const hasConcretePublicOfferingTitle = publicOfferingTitleRe.test(title) && !genericTitleRe.test(title);
   const titlePromisesSpecifics =
     amountPromiseRe.test(title) || yearPromiseRe.test(title) || deadlinePromiseRe.test(title);
+  const missingIdentityFacts = [
+    !sourceFacts.officialName ? "正式な制度名" : "",
+    !sourceFacts.administeringBody ? "実施機関" : "",
+    !hasUsableOfficialSource(sourceFacts) ? "公式URL・根拠メモ" : "",
+  ].filter(Boolean);
   let titleNeedsRewrite = false;
   const suggestedTitles: string[] = [];
 
@@ -720,15 +748,15 @@ const buildMachineQualityReview = (
   if (compactTextLength < 1500) {
     addFatal("本文が1,500文字未満です。", "対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。");
     addScoreCap(49, "本文が1,500文字未満です。");
-  } else if (compactTextLength < 3000) {
-    addWarning("本文が3,000文字未満です。", "概要だけで終わらないよう、用途別・経費別の見方や次の行動を追加してください。");
-    addScoreCap(79, "本文が3,000文字未満です。");
+  } else if (compactTextLength < 4000) {
+    addWarning("本文が4,000文字未満です。", "概要だけで終わらないよう、公式ファクト表、確認項目、申請準備、よくある失敗、愛媛県内での探し方を追加してください。");
+    addScoreCap(79, "本文が4,000文字未満です。");
   } else {
     strengths.push("通常コラムの推奨文字数を満たしています。");
   }
 
-  if ((normalizedArticleType === "feature" || articleData.category === "特集") && compactTextLength < 5000) {
-    addWarning("特集記事としては5,000文字未満です。", "特集では業種別・用途別の探し方と関連導線を厚めにしてください。");
+  if ((normalizedArticleType === "feature" || articleData.category === "特集") && compactTextLength < 6000) {
+    addWarning("特集記事としては6,000文字未満です。", "特集では業種別・用途別の探し方と関連導線を厚めにしてください。");
   }
 
   if (!hasOfficialEvidence) {
@@ -759,6 +787,26 @@ const buildMachineQualityReview = (
       titleNeedsRewrite = true;
       suggestedTitles.push(...suggestSafeTitles(title, sourceFacts));
     }
+  }
+
+  if (titlePromisesSpecifics && missingIdentityFacts.length > 0) {
+    addFatal(
+      `正式な制度名・実施機関・公式URLが確認できません。不足: ${missingIdentityFacts.join("、")}`,
+      "補助率・上限額・年度などをタイトルで約束する場合は、正式制度名、実施機関、公式URL、補助率、上限額を suppliedFacts に揃えてください。"
+    );
+    addScoreCap(39, "強いタイトルに必要な正式制度名・実施機関・公式URLが不足しています。");
+    titleNeedsRewrite = true;
+    suggestedTitles.push(...suggestSafeTitles(title, sourceFacts));
+  }
+
+  if (singleProgramLanguageRe.test(text) && (!sourceFacts.officialName || !hasOfficialEvidence)) {
+    addFatal(
+      "正式な単一制度を特定できないのに「この補助金」など単一制度を前提にした表現があります。",
+      "正式制度を特定できない場合は、業種別特集として複数制度の探し方・比較方法に書き換えてください。"
+    );
+    addScoreCap(39, "正式制度未特定のまま単一制度として書いています。");
+    titleNeedsRewrite = true;
+    suggestedTitles.push(...suggestSafeTitles(title, sourceFacts));
   }
 
   if (yearPromiseRe.test(title) && (!yearPromiseRe.test(text) || !hasOfficialEvidence)) {
@@ -796,8 +844,14 @@ const buildMachineQualityReview = (
   if (!hasTable(content)) {
     addFatal("表が1つもありません。", "対象者、対象経費、補助率、上限額、注意点などを表で整理してください。");
     addScoreCap(59, "表がありません。");
+  } else if (tableCount < 2) {
+    addWarning(
+      "表が1つだけです。記事の読み応えを出すため、公式ファクト表と申請前確認表など2つ以上に分けてください。",
+      "公式ファクト表、不足情報の確認表、対象経費の確認表、申請前チェック表を追加してください。"
+    );
+    addScoreCap(79, "表が1つだけです。");
   } else {
-    strengths.push("表で情報を整理しています。");
+    strengths.push("複数の表で情報を整理しています。");
   }
 
   if (internalLinks === 0) {
@@ -825,8 +879,8 @@ const buildMachineQualityReview = (
     strengths.push("愛媛県内の読者向けの文脈があります。");
   }
 
-  if (countH2(content) < 8) {
-    addWarning("H2が8個未満です。");
+  if (countH2(content) < 10) {
+    addWarning("H2が10個未満です。");
   }
 
   if (!hasChecklist(content)) {
@@ -876,6 +930,13 @@ const buildMachineQualityReview = (
   if (unsupportedClaims.length > 0) {
     addFatal(`公式ファクトで裏付けられない具体的主張があります: ${unsupportedClaims.join("、")}`);
     addScoreCap(39, "本文中に根拠不明の金額・日付・対象者・対象経費があります。");
+    if (unsupportedClaims.some((claim) => /(対象者|対象業種|対象経費|対象外経費)/.test(claim))) {
+      addFatal(
+        "根拠のない対象者・対象経費・対象外経費が記載されています。",
+        "suppliedFacts にない対象者、対象経費、対象外経費は本文から削除し、missingFacts として管理画面で確認してください。"
+      );
+      addScoreCap(39, "根拠のない対象者・対象経費・対象外経費があります。");
+    }
   }
 
   if (contradictoryClaims.length > 0) {
@@ -885,7 +946,7 @@ const buildMachineQualityReview = (
 
   const factualGroundingScore = calculateFactualGroundingScore(factualClaims, hasOfficialEvidence);
   const highScoreRequirementsMet =
-    compactTextLength >= 3000 &&
+    compactTextLength >= 4000 &&
     sourceCoverageScore === 100 &&
     factualGroundingScore === 100 &&
     targetRe.test(text) &&
@@ -896,7 +957,7 @@ const buildMachineQualityReview = (
     hasOfficialRoute &&
     hasOfficialEvidence &&
     ehimeContextRe.test(text) &&
-    hasTable(content) &&
+    tableCount >= 2 &&
     hasChecklist(content) &&
     internalLinks > 0 &&
     invalidInternalLinks.length === 0 &&
@@ -964,13 +1025,27 @@ const mergeQualityReviews = (
 ): ArticleQualityReview => {
   if (!aiReview) return machineReview;
 
+  // 通常の記事生成で返る自己採点は公開判定に使わない。
+  // 有料APIレビューを実行した場合だけ意味評価をルール点へ反映する。
+  if (!aiReview.llmReview.usedApi) {
+    return {
+      ...machineReview,
+      strengths: Array.from(new Set([...aiReview.strengths, ...machineReview.strengths])),
+      improvementSuggestions: Array.from(new Set([
+        ...aiReview.improvementSuggestions,
+        ...machineReview.improvementSuggestions,
+      ])),
+      suggestedTitles: Array.from(new Set([...aiReview.suggestedTitles, ...machineReview.suggestedTitles])),
+    };
+  }
+
   const fatalIssues = Array.from(new Set([...aiReview.fatalIssues, ...machineReview.fatalIssues]));
   const warnings = Array.from(new Set([...aiReview.warnings, ...machineReview.warnings]));
   const scoreCapsApplied = Array.from(new Set([...aiReview.scoreCapsApplied, ...machineReview.scoreCapsApplied]));
   const scoreCap = scoreCapsApplied.length
     ? Math.min(...scoreCapsApplied.map(extractScoreCap))
     : 100;
-  const qualityScore = Math.min(aiReview.qualityScore, machineReview.qualityScore, scoreCap);
+  const qualityScore = Math.min(aiReview.llmReview.semanticScore, machineReview.qualityScore, scoreCap);
   const llmReview = aiReview.llmReview.usedApi || aiReview.llmReview.enabled
     ? aiReview.llmReview
     : machineReview.llmReview;
@@ -980,7 +1055,6 @@ const mergeQualityReviews = (
   const titleNeedsRewrite = aiReview.titleNeedsRewrite || machineReview.titleNeedsRewrite;
   const suggestedTitles = Array.from(new Set([...aiReview.suggestedTitles, ...machineReview.suggestedTitles]));
   const publishAllowed =
-    aiReview.publishAllowed &&
     machineReview.publishAllowed &&
     fatalIssues.length === 0 &&
     unsupportedClaims.length === 0 &&
@@ -1514,6 +1588,123 @@ const generateImage = async ({
   return { base64Image, imageError, imageUrl, imageDebug };
 };
 
+type GeneratedArticleMetrics = {
+  textLength: number;
+  h2Count: number;
+  tableCount: number;
+};
+
+const getGeneratedArticleMetrics = (content: string): GeneratedArticleMetrics => ({
+  textLength: stripHtml(content).replace(/\s/g, "").length,
+  h2Count: (String(content || "").match(/<h2\b/gi) || []).length,
+  tableCount: (String(content || "").match(/<table\b/gi) || []).length,
+});
+
+const articleMetricPenalty = (metrics: GeneratedArticleMetrics, requiredLength: number) =>
+  Math.max(0, requiredLength - metrics.textLength) +
+  Math.max(0, 10 - metrics.h2Count) * 250 +
+  Math.max(0, 2 - metrics.tableCount) * 500;
+
+const expandGeneratedArticle = async ({
+  openAiKey,
+  textModel,
+  title,
+  content,
+  articleType,
+  sourceFacts,
+}: {
+  openAiKey: string;
+  textModel: string;
+  title: string;
+  content: string;
+  articleType: string;
+  sourceFacts: SourceFacts;
+}) => {
+  const requiredLength = articleType === "feature" ? 6000 : 4000;
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openAiKey}`,
+    },
+    body: JSON.stringify({
+      model: textModel,
+      temperature: 0.35,
+      max_completion_tokens: 12000,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "expanded_column_article",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              content: { type: "string" },
+            },
+            required: ["content"],
+            additionalProperties: false,
+          },
+        },
+      },
+      messages: [
+        {
+          role: "system",
+          content: `
+あなたは、えひめ補助金ポータルの長文記事編集者です。
+短い初稿を、公式ファクトだけに基づく読み応えのあるHTML記事へ補強してください。
+
+厳守:
+- suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを追加しない。
+- 初稿の正しい説明と公式リンクは維持し、不足する見出し・表・比較・チェックリスト・申請準備の説明だけを厚くする。
+- 同じ説明の言い換えや文字数稼ぎをしない。
+- H2を10個以上、表を2つ以上、チェックリスト、CTA、実在する内部リンクを含める。
+- 内部リンクは /ehime-subsidy/、/search、/simulator、/experts、/columns、/features、実在する /feature/ 配下だけを使う。
+- /subsidy-list は使わない。
+- 申請前に契約・発注・購入・着手できる時点は、公式ファクトに根拠がなければ公募要領と実施機関への確認を促す。
+- 公開本文へ品質スコア、fatalIssues、warnings、missingFacts、管理用メモを入れない。
+- 使用HTMLは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <caption> のみ。
+- 本文は最低${requiredLength.toLocaleString()}文字を目安にする。
+`.trim(),
+        },
+        {
+          role: "user",
+          content: `
+タイトル:
+${title}
+
+記事タイプ:
+${articleType}
+
+suppliedFacts:
+${JSON.stringify(sourceFacts, null, 2)}
+
+現在の初稿:
+${String(content || "").slice(0, 24000)}
+`.trim(),
+        },
+      ],
+    }),
+  });
+
+  const json = await response.json();
+  if (!response.ok) {
+    return {
+      content: "",
+      error: json?.error?.message || "記事の自動補強に失敗しました。",
+    };
+  }
+
+  const rawContent = json?.choices?.[0]?.message?.content;
+  if (!rawContent) return { content: "", error: "記事の自動補強結果が空です。" };
+
+  try {
+    const parsed = JSON.parse(rawContent);
+    return { content: normalizeGeneratedInternalLinks(parsed?.content || ""), error: "" };
+  } catch {
+    return { content: "", error: "記事の自動補強結果を解析できませんでした。" };
+  }
+};
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -1606,6 +1797,19 @@ serve(async (req: Request) => {
         });
       }
 
+      if (ruleReview.ruleBasedScore < 80 || !hasUsableOfficialSource(ruleReview.sourceFacts)) {
+        return jsonResponse({
+          error:
+            `APIレビューの前にルールベースの問題を修正してください。` +
+            ` ルールスコア: ${ruleReview.ruleBasedScore}/100、` +
+            `公式根拠: ${hasUsableOfficialSource(ruleReview.sourceFacts) ? "確認済み" : "不足"}`,
+          articleQualityReview: ruleReview,
+          articleQualityWarnings: buildArticleQualityWarnings(ruleReview),
+          sourceFacts: ruleReview.sourceFacts,
+          usedApi: false,
+        });
+      }
+
       const reviewOpenAiKey = Deno.env.get("OPENAI_API_KEY");
 
       if (!reviewOpenAiKey) {
@@ -1665,6 +1869,7 @@ serve(async (req: Request) => {
           usedApi: false,
         });
       }
+      const repairTextModel = Deno.env.get("OPENAI_TEXT_MODEL")?.trim() || "gpt-4o-mini";
 
       if (!originalBody || !originalTitle) {
         return jsonResponse({
@@ -1683,8 +1888,9 @@ serve(async (req: Request) => {
           Authorization: `Bearer ${repairOpenAiKey}`,
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: repairTextModel,
           temperature: 0.3,
+          max_completion_tokens: 12000,
           response_format: {
             type: "json_schema",
             json_schema: {
@@ -1711,9 +1917,12 @@ serve(async (req: Request) => {
               role: "system",
               content: `
 あなたは、えひめ補助金ポータルの公開前編集者です。
-品質レビューの指摘を反映して、HTML記事を修正してください。
+品質レビューの指摘箇所だけを優先して、HTML記事を修正してください。
 
 厳守:
+- 正しく書けている見出し・公式ファクト・内部リンクは維持し、全面的な言い換えをしない。
+- 文字数、表、見出し、チェックリストなど不足している要素を追加し、根拠不明の箇所だけを削除または安全化する。
+- 通常コラムは4,000文字以上、特集記事は6,000文字以上を目安にし、同じ説明の繰り返しで水増ししない。
 - suppliedFacts にない制度名、年度、補助率、上限額、締切、対象者、対象経費、対象外経費、公式URLを追加しない。
 - 根拠がない具体情報は削除、または「確認が必要」という安全表現に弱める。
 - タイトルに補助率・上限額・締切などを入れるのは、suppliedFacts に具体値がある場合だけ。
@@ -1841,6 +2050,7 @@ ${JSON.stringify({
     }
 
     const isAutoMode = Boolean(subsidiesText);
+    const textModel = Deno.env.get("OPENAI_TEXT_MODEL")?.trim() || "gpt-4o-mini";
     const imageModel = Deno.env.get("OPENAI_IMAGE_MODEL")?.trim() || "gpt-image-1";
     const imageQuality = imageQualityOrDefault(Deno.env.get("OPENAI_IMAGE_QUALITY") || "medium");
     const imageSize = imageSizeOrDefault(Deno.env.get("OPENAI_IMAGE_SIZE") || "1536x1024");
@@ -1882,19 +2092,22 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 【重要ルール】
 - 読者は愛媛県内の事業者です。
 - 公式ページや入力データの要約・言い換えだけで終わらせず、読者が次に判断できる整理を加えてください。
-- 通常コラムは最低3,000文字以上、特集記事は5,000文字以上を目安にしてください。
-- H2を8個以上入れてください。
-- 表を最低1つ、できれば2つ以上入れてください。
+- 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。
+- H2を10個以上入れてください。
+- 表を最低2つ以上入れてください。
 - チェックリスト、CTA、内部リンクを本文に自然に入れてください。
 - 使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
 - 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
 - 対象者、対象経費、対象外になりやすい経費、申請前注意を具体的に書いてください。
+- 公式ファクトで確認できていること、まだ確認が必要なこと、申請準備の流れ、よくある失敗と回避策を独立した見出しで厚めに書いてください。
 - 申請前に契約・発注・購入・着手しない注意を必ず書いてください。
 - 愛媛県、市町村、商工会議所、商工会、支援機関など愛媛県内の読者向けの視点を入れてください。
 - 文字数稼ぎの一般論、長い前置き、同じ内容の繰り返し、キーワードだけを差し替えた文章は禁止です。
 - 入力データにない日付、受付状況、金額、補助率、採択率、企業名、成功事例、URLを作らないでください。
 - suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを推測で補完しないでください。
 - suppliedFacts にない情報は missingFacts として quality_review に返し、本文では断定しないでください。
+- 正式な単一制度を特定できない場合は「この補助金」「上限額が設定されています」「一定の補助率が適用されます」など単一制度前提の表現を使わず、業種別・目的別の探し方として構成してください。
+- 産業廃棄物処理業者、リサイクル業者、設備投資、新技術導入、環境対策費、人件費、管理費、着手済み経費などの具体項目は、suppliedFacts に根拠がある場合だけ本文に書いてください。
 - 公式URLが入力データにある場合は、本文中に必ず公式情報へのリンクを入れてください。
 - 公式URLがない場合は、架空URLを作らず「公式ページや自治体窓口で確認」と書いてください。
 - タイトルで「補助率」「上限額」「令和8年度」「2026年」などを約束する場合は、本文に具体的な根拠・対象制度名・公式確認導線を必ず入れてください。
@@ -1913,10 +2126,14 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 【本文に必ず入れる内容】
 - 冒頭の結論
 - この記事でわかること
+- 公式ファクトで確認できていること
+- まだ確認が必要なこと
 - 対象になる可能性がある人
 - 対象になりやすい経費
 - 対象外・注意が必要な経費
 - 申請前に確認すること
+- 申請準備の流れ
+- よくある失敗と回避策
 - 業種別または用途別の見方
 - 愛媛県内での探し方
 - 公式情報の確認先
@@ -1930,7 +2147,7 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 1. 検索意図との一致: 15点。読者が知りたい答えに早く到達し、タイトルと本文がズレていないこと。
 2. 具体性: 15点。対象者、対象経費、対象外、申請前注意が具体的で、「詳しくは公式へ」だけで逃げないこと。
 3. 公式確認・安全性: 15点。公式確認導線、変更可能性、断定回避、未確認数字の抑制があること。
-4. 記事ボリューム: 10点。通常3,000文字以上、特集5,000文字以上を目安にすること。
+4. 記事ボリューム: 10点。通常4,000文字以上、特集6,000文字以上を目安にすること。
 5. 愛媛県向けの地域性: 10点。県内事業者、市町村、商工会議所、商工会、支援機関の視点があること。
 6. 読みやすさ: 10点。H2/H3、表、チェックリスト、CTAが自然であること。
 7. SEO内部リンク: 10点。関連検索、特集、シミュレーター、専門家導線につながること。
@@ -2066,8 +2283,9 @@ ${extraInstructionBlock}
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: textModel,
         temperature: 0.7,
+        max_completion_tokens: 12000,
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -2312,6 +2530,44 @@ ${extraInstructionBlock}
       articleData.category = preferredCategory;
     }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
+    const requiredArticleLength = articleType === "feature" || articleData.category === "特集" ? 6000 : 4000;
+    const initialArticleMetrics = getGeneratedArticleMetrics(articleData.content);
+    const shouldExpandArticle =
+      initialArticleMetrics.textLength < requiredArticleLength ||
+      initialArticleMetrics.h2Count < 10 ||
+      initialArticleMetrics.tableCount < 2;
+    const articleExpansion = {
+      attempted: shouldExpandArticle,
+      applied: false,
+      error: "",
+      before: initialArticleMetrics,
+      after: initialArticleMetrics,
+    };
+
+    if (shouldExpandArticle) {
+      const expansionResult = await expandGeneratedArticle({
+        openAiKey,
+        textModel,
+        title: articleData.title,
+        content: articleData.content,
+        articleType: articleType === "feature" || articleData.category === "特集" ? "feature" : articleType,
+        sourceFacts: suppliedFacts,
+      });
+
+      articleExpansion.error = expansionResult.error;
+      if (expansionResult.content) {
+        const expandedMetrics = getGeneratedArticleMetrics(expansionResult.content);
+        articleExpansion.after = expandedMetrics;
+        if (
+          articleMetricPenalty(expandedMetrics, requiredArticleLength) <
+          articleMetricPenalty(initialArticleMetrics, requiredArticleLength)
+        ) {
+          articleData.content = expansionResult.content;
+          articleExpansion.applied = true;
+        }
+      }
+    }
+
     const articleQualityReview = mergeQualityReviews(
       normalizeAiQualityReview(articleData.quality_review),
       buildMachineQualityReview(articleData, articleType, {
@@ -2347,6 +2603,8 @@ ${extraInstructionBlock}
       imageModel,
       imageQuality,
       imageSize,
+      textModel,
+      articleExpansion,
       sourceFacts: articleQualityReview.sourceFacts,
     });
   } catch (error) {

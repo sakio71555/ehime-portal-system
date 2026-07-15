@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 import {
+  buildColumnSourceFacts,
   COLUMN_GENERATION_PROMPT_RULES,
   PUBLISH_QUALITY_CHECKS,
   mergeColumnQualityReview,
@@ -24,6 +25,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
   const [isBackfillingImages, setIsBackfillingImages] = useState(false);
   const [isRunningQualityReview, setIsRunningQualityReview] = useState(false);
   const [isRepairingArticle, setIsRepairingArticle] = useState(false);
+  const [isFetchingOfficialSource, setIsFetchingOfficialSource] = useState(false);
 
   const fetchColumns = useCallback(async () => {
     if (!supabase) {
@@ -75,46 +77,169 @@ export default function AdminColumns({ initialMode = 'columns' }) {
     }
   };
 
-  const buildGenerationPrompt = (column) => {
-    const baseTitle = column.title || '';
-    const instructions = (column.ai_instructions || '').trim();
-    const isFeatureArticle = column.category === FEATURE_CATEGORY;
+  const hasUsableOfficialSource = (sourceFacts) =>
+    Boolean(
+      sourceFacts?.officialSources?.some(
+        (source) => source?.url && source?.evidence && source.evidence.length >= 12
+      )
+    );
 
-    return `
-【記事タイトル・テーマ】
-${baseTitle}
+  const buildSourceFactsForColumn = (column) =>
+    buildColumnSourceFacts({
+      sourceFacts: column?.quality_review?.sourceFacts,
+      sourceText: column?.ai_instructions || '',
+      title: column?.title || column?.seo_title || '',
+      content: column?.content || '',
+      category: column?.category || '',
+      articleType: column?.category === FEATURE_CATEGORY ? 'feature' : 'column',
+    });
 
-【記事種別】
-${isFeatureArticle ? 'トップページの「人気の特集から探す」に表示する特集記事' : '通常コラム記事'}
+  const handleFetchOfficialSource = async () => {
+    if (!supabase) return alert('Supabaseの接続情報が設定されていません。');
 
-${instructions
-  ? `【必ず反映してほしい文章・素材】
-${instructions}`
-  : '【必ず反映してほしい文章・素材】\n未入力。テーマに対して、読者が申請前に判断できる実用情報を中心に構成してください。'}
+    const sourceUrl = String(editingColumn?.official_source_url || '').trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(sourceUrl)) {
+      return alert('取得する公式ページのURLを入力してください。');
+    }
+    if (
+      !window.confirm(
+        '公式ページ本文の取得と制度情報の構造化に外部APIを使用します。\nAPI利用料が発生する可能性があります。\n実行しますか？'
+      )
+    ) {
+      return;
+    }
 
-${COLUMN_GENERATION_PROMPT_RULES}
+    setIsFetchingOfficialSource(true);
 
-【本文に必ず入れる見出し】
-- 冒頭の結論
-- この記事でわかること
-- 対象になる可能性がある人
-- 対象になりやすい経費
-- 対象外・注意が必要な経費
-- 申請前に確認すること
-- 業種別または用途別の見方
-- 愛媛県内での探し方
-- 公式情報の確認先
-- 注意点
-- 内部リンク
-- CTA
-- まとめ
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-page-text', {
+        body: {
+          sourceUrl,
+          title: editingColumn.title || '',
+        },
+      });
 
-【執筆ルール】
-- 素材を丸写しせず、読者が比較・判断しやすい順番に再構成してください。
-- 制度名・市町村名・注意点・公式URLは、入力素材にある範囲でできるだけ残してください。
-- HTML本文は <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <caption> を中心にしてください。
-${isFeatureArticle ? '- category は必ず「特集」にしてください。' : ''}
-`.trim();
+      if (error) throw new Error(`サーバー通信エラー: ${error.message}`);
+      if (data?.error) throw new Error(data.error);
+
+      const officialText = String(data?.sourceText || '').trim();
+      const resolvedUrl = String(data?.resolvedUrl || sourceUrl).trim();
+      if (officialText.length < 80) {
+        throw new Error('公式ページから記事作成に使える本文を十分取得できませんでした。');
+      }
+
+      const { data: extractedData, error: extractError } = await supabase.functions.invoke('extract-subsidy', {
+        body: {
+          extractedText: officialText,
+          resolvedUrl,
+          editFormTitle: editingColumn.title || '',
+          org: '愛媛県',
+        },
+      });
+
+      if (extractError) throw new Error(`制度情報の構造化エラー: ${extractError.message}`);
+      if (extractedData?.error) throw new Error(extractedData.error);
+
+      const extractedFacts = extractedData?.facts || {};
+
+      const checkedAt = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+      const currentInstructions = String(editingColumn.ai_instructions || '')
+        .replace(/【公式取得データ】[\s\S]*?【公式取得データここまで】\s*/g, '')
+        .trim();
+      const sourceBlock = [
+        '【公式取得データ】',
+        `タイトル: ${editingColumn.title || '未入力'}`,
+        `公式URL: ${resolvedUrl}`,
+        `確認日: ${checkedAt}`,
+        '公式ページ本文:',
+        officialText.slice(0, 14000),
+        '【公式取得データここまで】',
+      ].join('\n');
+      const extractedEvidence = [
+        extractedFacts.evidence?.application_period_text,
+        extractedFacts.evidence?.amount_text,
+        extractedFacts.evidence?.subsidy_rate_text,
+        extractedFacts.evidence?.target_entities_arr,
+        extractedFacts.evidence?.target_expenses_arr,
+        extractedFacts.summary,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .slice(0, 1600);
+      const extractedSourceFacts = {
+        articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'single_program',
+        officialName: extractedFacts.title || editingColumn.title || '',
+        fiscalYear: extractedFacts.fiscal_year || '',
+        applicationRound: '',
+        administeringBody: extractedFacts.organization || '',
+        supervisingBody: '',
+        applicationStart: extractedFacts.application_start_date || '',
+        applicationDeadline:
+          extractedFacts.application_period_text || extractedFacts.application_end_date || '',
+        subsidyRate: extractedFacts.subsidy_rate_text || '',
+        subsidyCap: extractedFacts.amount_text || '',
+        eligibleApplicants: Array.isArray(extractedFacts.target_entities_arr)
+          ? extractedFacts.target_entities_arr
+          : [],
+        eligibleProjects: [],
+        eligibleExpenses: Array.isArray(extractedFacts.target_expenses_arr)
+          ? extractedFacts.target_expenses_arr
+          : [],
+        ineligibleExpenses: [],
+        applicationMethods: [],
+        projectPeriod: '',
+        preStartRule: {
+          confirmed: false,
+          allowedFrom: '',
+          safeDescription: '',
+          sourceId: '',
+        },
+        officialSources: [
+          {
+            id: 'source-1',
+            label: extractedFacts.title || editingColumn.title || '公式情報',
+            url: extractedFacts.official_url || resolvedUrl,
+            checkedAt,
+            evidence: extractedEvidence || officialText.slice(0, 1600),
+          },
+        ],
+        unknownFields: [],
+      };
+
+      setEditingColumn((prev) => ({
+        ...prev,
+        official_source_url: resolvedUrl,
+        ai_instructions: [sourceBlock, currentInstructions].filter(Boolean).join('\n\n'),
+        quality_review: {
+          ...(prev?.quality_review || {}),
+          sourceFacts: extractedSourceFacts,
+          humanReviewed: false,
+          humanReviewCompleted: false,
+        },
+        official_source_fetch: {
+          url: resolvedUrl,
+          checkedAt,
+          textLength: officialText.length,
+        },
+      }));
+
+      alert(
+        `公式情報を取得・構造化しました。\n` +
+          `取得文字数: ${officialText.length.toLocaleString()}文字\n` +
+          `制度名: ${extractedSourceFacts.officialName || '未確認'}\n` +
+          `実施機関: ${extractedSourceFacts.administeringBody || '未確認'}\n\n` +
+          `生成前に公式ファクト欄と素材欄を確認してください。`
+      );
+    } catch (err) {
+      alert(`公式情報取得エラー: ${err.message}`);
+    } finally {
+      setIsFetchingOfficialSource(false);
+    }
   };
 
   const normalizeBase64Image = (base64Image) => {
@@ -146,6 +271,9 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     return '#059669';
   };
 
+  const getColumnHumanReviewed = (column) =>
+    Boolean(column?.quality_review?.humanReviewed || column?.quality_review?.humanReviewCompleted);
+
   const buildGeneratedColumnDraft = (articleData, fallbackColumn = {}) => ({
     ...fallbackColumn,
     title: articleData.title || fallbackColumn.title,
@@ -172,6 +300,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       articleType,
       sourceFacts: data?.sourceFacts || data?.articleQualityReview?.sourceFacts || articleData?.sourceFacts,
       sourceText: data?.sourceText || fallbackColumn.ai_instructions || '',
+      humanReviewed: getColumnHumanReviewed(fallbackColumn),
     });
   };
 
@@ -183,6 +312,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       `公式情報充足率: ${review.sourceCoverageScore ?? 0}/100`,
       `事実根拠スコア: ${review.factualGroundingScore ?? 0}/100`,
       review.shouldRegenerate ? '再生成推奨: はい' : '再生成推奨: いいえ',
+      review.humanReviewed ? '人間確認: 完了' : '人間確認: 未完了',
       review.publishAllowed ? '公開判定: 公開可能' : '公開判定: 公開不可または要確認',
     ];
 
@@ -383,9 +513,16 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       return alert('まずは「タイトル」を入力してください。（例：「補助率」と「補助上限額」とは？）');
     }
 
+    const suppliedFacts = buildSourceFactsForColumn(editingColumn);
+    if (!hasUsableOfficialSource(suppliedFacts)) {
+      return alert(
+        '公式URLと根拠本文が確認できません。\n\n「公式ページURL」を入力して「公式情報を取得」を押すか、素材欄へ公式URL・確認日・一次情報を貼り付けてください。'
+      );
+    }
+
     if (
       !window.confirm(
-        `「${editingColumn.title}」というテーマで、公開前確認用のAI下書きとサムネイル画像を生成しますか？\n（※現在入力されている本文は上書きされ、公開ステータスは下書きになります。約1分かかります）`
+        `「${editingColumn.title}」というテーマで、公式情報に基づく公開前確認用のAI下書きとサムネイル画像を生成しますか？\n記事が短い場合は自動補強のためOpenAI APIを追加で1回使用します。\n（※現在入力されている本文は上書きされ、公開ステータスは下書きになります）`
       )
     ) {
       return;
@@ -395,16 +532,16 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     try {
       const isFeatureArticle = editingColumn.category === FEATURE_CATEGORY;
-      const generationPrompt = buildGenerationPrompt(editingColumn);
+      const generationPrompt = editingColumn.title.trim();
 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           title: generationPrompt,
           requestedTitle: editingColumn.title || '',
           sourceText: editingColumn.ai_instructions || '',
+          sourceFacts: suppliedFacts,
           articleType: isFeatureArticle ? 'feature' : 'column',
           category: editingColumn.category || '',
-          // 追加指示は title 側にも埋め込む。未デプロイの旧Edge Functionでも反映されるようにするため。
           extraInstructions: '',
         },
       });
@@ -425,6 +562,11 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         editingColumn,
         isFeatureArticle ? 'feature' : 'column'
       );
+      const expansionNotice = data?.articleExpansion?.attempted
+        ? data.articleExpansion.applied
+          ? `\n\n短い初稿を自動補強しました（${data.articleExpansion.before?.textLength || 0}文字 → ${data.articleExpansion.after?.textLength || 0}文字）。`
+          : `\n\n自動補強は適用されませんでした。${data.articleExpansion.error ? ` 理由: ${data.articleExpansion.error}` : ''}`
+        : '';
 
       let finalThumbnailUrl = editingColumn.thumbnail_url || '';
 
@@ -441,13 +583,15 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       if (finalThumbnailUrl) {
         alert(
           'AI下書きと画像の生成が完了しました。公開前チェックを確認し、必要な公式リンク・注意点を整えてから保存してください。' +
+            expansionNotice +
             `\n\n${formatQualityReviewForAlert(articleQualityReview)}`
         );
       } else {
         alert(
           `記事は生成できましたが、画像は生成できませんでした。\n` +
-            `原因: ${imageErrorMessage || '画像データが返ってきませんでした。'}\n\n` +
-            `記事内容は下書きとして保存できます。公開前に公式リンク・確認日・注意点を必ず確認してください。\n\n` +
+          `原因: ${imageErrorMessage || '画像データが返ってきませんでした。'}\n\n` +
+          expansionNotice +
+          `記事内容は下書きとして保存できます。公開前に公式リンク・確認日・注意点を必ず確認してください。\n\n` +
             `${formatQualityReviewForAlert(articleQualityReview)}`
         );
       }
@@ -474,8 +618,18 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       const articleType = editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column';
       const ruleBasedReview = reviewColumnQuality(editingColumn, {
         articleType,
+        sourceFacts: buildSourceFactsForColumn(editingColumn),
         sourceText: editingColumn.ai_instructions || '',
+        humanReviewed: getColumnHumanReviewed(editingColumn),
       });
+      if (ruleBasedReview.ruleBasedScore < 80 || !hasUsableOfficialSource(ruleBasedReview.sourceFacts)) {
+        return alert(
+          `API品質レビューの前にルールベースの問題を修正してください。\n\n` +
+            `ルールスコア: ${ruleBasedReview.ruleBasedScore}/100\n` +
+            `公式根拠: ${hasUsableOfficialSource(ruleBasedReview.sourceFacts) ? '確認済み' : '不足'}\n\n` +
+            `先に「指摘を反映して修正生成」または本文の手動修正を行ってください。`
+        );
+      }
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           qualityReviewOnly: true,
@@ -499,6 +653,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         articleType,
         sourceFacts: data?.articleQualityReview?.sourceFacts || ruleBasedReview.sourceFacts,
         sourceText: editingColumn.ai_instructions || '',
+        humanReviewed: getColumnHumanReviewed(editingColumn),
       });
 
       setEditingColumn((prev) => ({
@@ -525,8 +680,13 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     const articleType = editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column';
     const currentReview = mergeColumnQualityReview(editingColumn.quality_review, editingColumn, {
       articleType,
+      sourceFacts: buildSourceFactsForColumn(editingColumn),
       sourceText: editingColumn.ai_instructions || '',
+      humanReviewed: getColumnHumanReviewed(editingColumn),
     });
+    if (!hasUsableOfficialSource(currentReview.sourceFacts)) {
+      return alert('修正生成の前に公式URLと根拠本文を取得・入力してください。');
+    }
     const currentIteration = Number(currentReview.repairIterations || 0);
 
     if (currentIteration >= 2) {
@@ -701,6 +861,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
           category: articleData.category,
           tags: articleData.tags || [],
           is_published: false,
+          quality_review: articleQualityReview,
         },
       ]);
 
@@ -741,7 +902,9 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
     const qualityReview = reviewColumnQuality(editingColumn, {
       articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column',
+      sourceFacts: buildSourceFactsForColumn(editingColumn),
       sourceText: editingColumn.ai_instructions || '',
+      humanReviewed: getColumnHumanReviewed(editingColumn),
     });
 
     const hardBlockReasons = [
@@ -749,6 +912,13 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
       ...(qualityReview.unsupportedClaims || []).map((claim) => `根拠不明の主張: ${claim}`),
       ...(qualityReview.contradictoryClaims || []).map((claim) => `公式情報と矛盾する可能性: ${claim}`),
       ...(qualityReview.titleNeedsRewrite ? ['タイトル変更推奨が出ています。安全なタイトル案に修正してください。'] : []),
+      ...(qualityReview.missingFacts?.length > 0
+        ? [`公式ファクト不足: ${qualityReview.missingFacts.join('、')}`]
+        : []),
+      ...(qualityReview.qualityScore < 90
+        ? [`最終品質スコアが90点未満です（${qualityReview.qualityScore}/100）。`]
+        : []),
+      ...(qualityReview.publishAllowed ? [] : ['公開可能判定ではありません。']),
     ];
 
     if (editingColumn.is_published && hardBlockReasons.length > 0) {
@@ -792,6 +962,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
         thumbnail_url: editingColumn.thumbnail_url,
         thumbnail_text: editingColumn.thumbnail_text || '',
         tags: editingColumn.tags || [],
+        quality_review: qualityReview,
       };
 
       if (editingColumn.id) {
@@ -832,6 +1003,7 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
     tags: [],
     is_published: false,
     ai_instructions: '',
+    official_source_url: '',
     ...overrides,
   });
 
@@ -843,8 +1015,18 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
   const editingQualityReview = editingColumn
     ? mergeColumnQualityReview(editingColumn.quality_review, editingColumn, {
         articleType: editingColumn.category === FEATURE_CATEGORY ? 'feature' : 'column',
+        sourceFacts: buildSourceFactsForColumn(editingColumn),
+        sourceText: editingColumn.ai_instructions || '',
+        humanReviewed: getColumnHumanReviewed(editingColumn),
       })
     : null;
+  const editingSourceFacts = editingColumn ? buildSourceFactsForColumn(editingColumn) : null;
+  const editingHasOfficialSource = hasUsableOfficialSource(editingSourceFacts);
+  const canRunLlmReview = Boolean(
+    editingQualityReview &&
+      editingQualityReview.ruleBasedScore >= 80 &&
+      editingHasOfficialSource
+  );
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6', fontFamily: 'sans-serif' }}>
@@ -956,8 +1138,9 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                 <button
                   type="button"
                   onClick={handleGenerateFromTitle}
-                  disabled={isGeneratingTitle}
-                  style={{ backgroundColor: isGeneratingTitle ? '#9ca3af' : editingColumn.category === FEATURE_CATEGORY ? '#f59e0b' : '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isGeneratingTitle ? 'not-allowed' : 'pointer', border: 'none', fontSize: '14px', whiteSpace: 'nowrap', transition: 'background-color 0.2s' }}
+                  disabled={isGeneratingTitle || !editingHasOfficialSource}
+                  title={editingHasOfficialSource ? '' : '先に公式情報を取得・入力してください。'}
+                  style={{ backgroundColor: isGeneratingTitle || !editingHasOfficialSource ? '#9ca3af' : editingColumn.category === FEATURE_CATEGORY ? '#f59e0b' : '#3b82f6', color: 'white', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isGeneratingTitle || !editingHasOfficialSource ? 'not-allowed' : 'pointer', border: 'none', fontSize: '14px', whiteSpace: 'nowrap', transition: 'background-color 0.2s' }}
                 >
                   {isGeneratingTitle
                     ? 'AI下書き・画像生成中...'
@@ -969,7 +1152,56 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 
               <div style={{ backgroundColor: editingColumn.category === FEATURE_CATEGORY ? '#fffbeb' : '#f8fafc', border: editingColumn.category === FEATURE_CATEGORY ? '1px solid #fde68a' : '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
                 <label style={{ display: 'block', fontSize: '13px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>
-                  AI下書きに入れる素材・確認メモ（推奨）
+                  公式ページURL（AI下書き作成前に必須）
+                </label>
+
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  <input
+                    type="url"
+                    placeholder="https://www.pref.ehime.jp/..."
+                    value={editingColumn.official_source_url || ''}
+                    onChange={(e) =>
+                      setEditingColumn((prev) => ({
+                        ...prev,
+                        official_source_url: e.target.value,
+                      }))
+                    }
+                    style={{ flex: '1 1 520px', minWidth: 0, padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleFetchOfficialSource}
+                    disabled={isFetchingOfficialSource}
+                    style={{ backgroundColor: isFetchingOfficialSource ? '#9ca3af' : '#0f766e', color: 'white', padding: '10px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: isFetchingOfficialSource ? 'not-allowed' : 'pointer', border: 'none', fontSize: '13px', whiteSpace: 'nowrap' }}
+                  >
+                    {isFetchingOfficialSource ? '公式情報を取得中...' : '公式情報を取得・構造化'}
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: '12px', padding: '10px 12px', borderRadius: '6px', backgroundColor: editingHasOfficialSource ? '#ecfdf5' : '#fff7ed', border: `1px solid ${editingHasOfficialSource ? '#a7f3d0' : '#fed7aa'}`, color: editingHasOfficialSource ? '#047857' : '#9a3412', fontSize: '12px', lineHeight: 1.6 }}>
+                  {editingHasOfficialSource
+                    ? `公式根拠を確認済みです。${editingColumn.official_source_fetch?.textLength ? ` 取得本文: ${editingColumn.official_source_fetch.textLength.toLocaleString()}文字` : ''}`
+                    : '公式URLだけでは生成できません。公式ページ本文または根拠メモまで取得・入力してください。'}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                  {[
+                    ['制度名', editingSourceFacts?.officialName],
+                    ['実施機関', editingSourceFacts?.administeringBody],
+                    ['補助率', editingSourceFacts?.subsidyRate],
+                    ['上限額', editingSourceFacts?.subsidyCap],
+                    ['締切', editingSourceFacts?.applicationDeadline],
+                    ['公式資料', editingSourceFacts?.officialSources?.[0]?.label],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ padding: '8px 10px', borderRadius: '6px', backgroundColor: 'white', border: '1px solid #e2e8f0', color: '#334155', fontSize: '12px', lineHeight: 1.5, minWidth: 0, overflowWrap: 'break-word' }}>
+                      <strong style={{ display: 'block', color: '#64748b', marginBottom: '2px' }}>{label}</strong>
+                      {value || '未確認'}
+                    </div>
+                  ))}
+                </div>
+
+                <label style={{ display: 'block', fontSize: '13px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>
+                  AI下書きに入れる公式情報・確認メモ（必須）
                 </label>
 
                 <textarea
@@ -990,9 +1222,48 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
                 />
 
                 <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '12px', lineHeight: 1.6 }}>
-                  公式URL、確認日、一次情報メモ、現場で迷いやすい点を入れるほど、薄い要約記事になりにくくなります。
+                  取得した公式情報を確認し、必要に応じて現場で迷いやすい点や独自の補足を追記してください。
                 </p>
               </div>
+
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: `1px solid ${getColumnHumanReviewed(editingColumn) ? '#bbf7d0' : '#fed7aa'}`,
+                  backgroundColor: getColumnHumanReviewed(editingColumn) ? '#f0fdf4' : '#fff7ed',
+                  color: getColumnHumanReviewed(editingColumn) ? '#166534' : '#9a3412',
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={getColumnHumanReviewed(editingColumn)}
+                  onChange={(e) =>
+                    setEditingColumn((prev) => ({
+                      ...prev,
+                      quality_review: {
+                        ...(prev?.quality_review || {}),
+                        humanReviewed: e.target.checked,
+                        humanReviewCompleted: e.target.checked,
+                      },
+                    }))
+                  }
+                  style={{ marginTop: '3px' }}
+                />
+                <span>
+                  人間確認済み
+                  <span style={{ display: 'block', fontWeight: 500 }}>
+                    公式URL・制度名・実施機関・補助率/上限額など、本文の断定表現を人間が確認した場合だけチェックしてください。
+                  </span>
+                </span>
+              </label>
 
               <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '16px' }}>
 	                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
@@ -1101,16 +1372,17 @@ ${isFeatureArticle ? '- category は必ず「特集」にしてください。' 
 	                    <button
 	                      type="button"
 	                      onClick={handleRunLlmQualityReview}
-	                      disabled={isRunningQualityReview}
+	                      disabled={isRunningQualityReview || !canRunLlmReview}
+	                      title={canRunLlmReview ? '' : 'ルール80点以上かつ公式根拠確認後に実行できます。'}
 	                      style={{
-	                        backgroundColor: isRunningQualityReview ? '#e5e7eb' : '#ffffff',
-	                        color: isRunningQualityReview ? '#6b7280' : '#3730a3',
+	                        backgroundColor: isRunningQualityReview || !canRunLlmReview ? '#e5e7eb' : '#ffffff',
+	                        color: isRunningQualityReview || !canRunLlmReview ? '#6b7280' : '#3730a3',
 	                        border: '1px solid #c7d2fe',
 	                        borderRadius: '999px',
 	                        padding: '7px 12px',
 	                        fontSize: '12px',
 	                        fontWeight: 'bold',
-	                        cursor: isRunningQualityReview ? 'not-allowed' : 'pointer',
+	                        cursor: isRunningQualityReview || !canRunLlmReview ? 'not-allowed' : 'pointer',
 	                      }}
 	                    >
 	                      {isRunningQualityReview ? 'APIレビュー中...' : 'API品質レビュー'}
