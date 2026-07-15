@@ -1022,6 +1022,14 @@ export default function AdminColumns({ initialMode = 'columns' }) {
           data.articleExpansion.applied ? 'success' : 'warning'
         );
       }
+      if (data?.structuredFallback?.attempted) {
+        addLog(
+          data.structuredFallback.applied
+            ? `✅ 公式ファクトから記事構成を再作成しました（${data.structuredFallback.before?.textLength || 0}文字・${data.structuredFallback.qualityBefore || 0}点 → ${data.structuredFallback.after?.textLength || initialTextLength}文字・${data.structuredFallback.qualityAfter || 0}点）。`
+            : `⚠️ 公式ファクトによる記事再構成は不採用です。${data.structuredFallback.rejectedReason || ''}`,
+          data.structuredFallback.applied ? 'success' : 'warning'
+        );
+      }
       addLog(
         `✅ 第1段階完了: ${initialTextLength}文字 / ルール品質 ${articleQualityReview.ruleBasedScore || 0}/100`,
         'success'

@@ -320,6 +320,146 @@ const ensureGeneratedInternalLinks = (content = "") => {
   return `${normalized}\n<p><strong>関連ページ:</strong> <a href="/ehime-subsidy/">愛媛県の補助金一覧を見る</a>、<a href="/simulator">補助金かんたん診断を使う</a></p>`;
 };
 
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const factListText = (items: string[] = [], fallback = "公式ページ・公募要領で確認が必要です。") =>
+  items.length ? items.map((item) => escapeHtml(item)).join("、") : fallback;
+
+const buildFactGroundedArticle = (sourceFacts: SourceFacts) => {
+  const name = escapeHtml(sourceFacts.officialName || "愛媛県内の支援制度");
+  const body = escapeHtml(sourceFacts.administeringBody || "実施機関");
+  const programKind = sourceFacts.programKind;
+  const isSubsidy = programKind === "subsidy";
+  const applicants = factListText(sourceFacts.eligibleApplicants);
+  const projects = factListText(
+    sourceFacts.eligibleProjects,
+    "対象事業の詳細は、公式ページ・公募要領で確認が必要です。"
+  );
+  const expenses = factListText(
+    sourceFacts.eligibleExpenses,
+    "対象経費の詳細は、公式ページ・公募要領で確認が必要です。"
+  );
+  const exclusions = factListText(
+    sourceFacts.ineligibleExpenses,
+    "対象外経費の明細は構造化済み公式ファクトに含まれていないため、公募要領で確認が必要です。"
+  );
+  const eligibility = factListText(
+    sourceFacts.eligibilityConditions,
+    "交付・支給要件の詳細は、公式ページ・公募要領で確認が必要です。"
+  );
+  const paymentConditions = factListText(
+    sourceFacts.paymentConditions,
+    "交付・支給条件の詳細は、公式ページ・公募要領で確認が必要です。"
+  );
+  const applicationMethods = factListText(
+    sourceFacts.applicationMethods,
+    "申請方法と提出書類は、公式ページ・公募要領で確認が必要です。"
+  );
+  const applicationPeriod = escapeHtml(
+    sourceFacts.applicationDeadline || "申請期間・締切は公式ページで確認が必要です。"
+  );
+  const subsidyRate = escapeHtml(
+    sourceFacts.subsidyRate || "補助率は公式ページ・公募要領で確認が必要です。"
+  );
+  const subsidyCap = escapeHtml(
+    sourceFacts.subsidyCap || sourceFacts.calculationMethod || "上限額・算定方法は公式ページで確認が必要です。"
+  );
+  const calculationMethod = escapeHtml(
+    sourceFacts.calculationMethod || "金額の算定方法は公式ページ・公募要領で確認が必要です。"
+  );
+  const startRule = escapeHtml(
+    sourceFacts.preStartRule.safeDescription ||
+      "申請前や交付決定前の契約・発注・購入・着手が対象外になる場合があります。実行前に公募要領と実施機関へ確認してください。"
+  );
+  const officialSource = sourceFacts.officialSources.find((source) => source.url) || sourceFacts.officialSources[0];
+  const officialUrl = escapeHtml(officialSource?.url || "");
+  const checkedAt = escapeHtml(officialSource?.checkedAt || "確認日未記載");
+  const officialLink = officialUrl
+    ? `<a href="${officialUrl}">${body}の公式情報を確認する</a>`
+    : `${body}の公式ページ・担当窓口で確認してください。`;
+  const detailLabel = isSubsidy ? "対象者・対象経費" : "対象者・交付条件";
+  const title = `${sourceFacts.officialName || "愛媛県内の支援制度"}の${detailLabel}と申請前の確認ポイント`;
+  const metaDescription = `${sourceFacts.officialName || "愛媛県内の支援制度"}について、対象者、${isSubsidy ? "対象経費、補助率・上限額" : "交付条件、算定方法"}、申請期間、申請前の注意点を公式情報に基づいて整理します。`;
+
+  const content = `
+<p><strong>${name}</strong>を検討するときは、制度名だけで利用可否を判断せず、対象者、${isSubsidy ? "対象事業と対象経費" : "交付・支給要件"}、申請期間、金額の条件を順番に照合することが重要です。この記事では、収集した公式資料から構造化できた内容と、申請前に追加確認すべき内容を分けて整理します。</p>
+<p>公式情報の確認日は${checkedAt}です。制度内容や受付状況は変更される場合があるため、実際に申請する前には${officialLink}。記事だけで申請可否を確定せず、最新の公募要領、交付要綱、申請様式もあわせて確認してください。</p>
+
+<h2>結論：最初に対象条件と申請時期を確認する</h2>
+<p>${name}では、まず自社や自身が対象者に該当するかを確認し、その後に${isSubsidy ? "予定している取組と支出が対象事業・対象経費に含まれるか" : "立地・雇用・操業などの交付条件を満たせるか"}を確認します。対象者として読み取れた内容は「${applicants}」です。ただし、所在地、事業規模、事業開始時期などの細かな要件が別に定められている場合があるため、名称だけで対象と判断しないでください。</p>
+<p>次に、申請期間と事業実施の順序を確認します。構造化済みの申請期間は「${applicationPeriod}」です。締切だけでなく、事前相談、申請、審査、交付決定、契約、実施、実績報告という流れのどこから行動できるかを公募要領で確かめる必要があります。特に発注や購入を予定している場合は、手続きを始める前に実施機関へ確認するのが安全です。</p>
+<p>制度の条件を確認するときは、「対象になりそう」という印象と「公式要件を満たしている」という判断を分けてください。申請者に関する条件、取組に関する条件、支出に関する条件、時期に関する条件を別々に整理し、それぞれの根拠となる公式資料の箇所を控えます。この整理を先に行うと、申請書を書き始めた後で重要な要件の見落としに気づく事態を避けやすくなります。</p>
+
+<h2>公式情報で確認できた制度概要</h2>
+<p>現時点で構造化できた公式ファクトを一覧にしました。空欄を推測で補うのではなく、確認できた情報と追加確認が必要な情報を分けています。申請を検討するときは、この表を入口として、必ず元の公式資料へ戻って条件の全文を読んでください。</p>
+<table><caption>${name}の公式ファクト</caption><thead><tr><th>確認項目</th><th>確認できた内容</th></tr></thead><tbody>
+<tr><th>正式制度名</th><td>${name}</td></tr>
+<tr><th>実施機関</th><td>${body}</td></tr>
+<tr><th>制度種別</th><td>${escapeHtml(programKindLabels[programKind])}</td></tr>
+<tr><th>対象者</th><td>${applicants}</td></tr>
+<tr><th>申請期間</th><td>${applicationPeriod}</td></tr>
+<tr><th>${isSubsidy ? "補助率" : "算定方法"}</th><td>${isSubsidy ? subsidyRate : calculationMethod}</td></tr>
+<tr><th>${isSubsidy ? "上限額" : "交付・支給条件"}</th><td>${isSubsidy ? subsidyCap : paymentConditions}</td></tr>
+</tbody></table>
+<p>表に記載した内容は要点です。対象者の定義、対象期間、申請単位、他制度との併用、提出方法などは、別紙や交付要綱に記載されていることがあります。自社に関係する条件を抜き出し、公式資料の該当箇所と照合できる状態にしてから申請準備へ進むと、読み違いを減らせます。</p>
+<p>公式資料が複数ある場合は、制度紹介ページだけでなく、公募要領、交付要綱、別表、申請様式、記載例も確認します。資料ごとに役割が異なり、概要ページには載っていない条件が別表や様式の注意書きに示されることがあります。資料名と更新日を控え、古い年度の資料と混在していないかを確認してから、自社用の確認メモへ転記してください。</p>
+
+<h2>対象者と対象事業・交付要件を照合する</h2>
+<p>対象者について公式資料から確認できた内容は「${applicants}」です。ここでは、法人・個人事業主などの区分だけでなく、所在地、事業所、事業実績、税の納付状況など、制度ごとに追加条件がないかを確認してください。対象者の文章に複数の条件が並ぶ場合は、いずれか一つではなく、すべて満たす必要があるのかを実施機関へ確認します。</p>
+<p>${isSubsidy ? `対象事業・取組として確認できた内容は「${projects}」です。実施したい取組が制度の目的と合っていても、対象となる事業期間や実施場所が合わなければ申請できない場合があります。` : `交付・支給要件として確認できた内容は「${eligibility}」です。立地、操業開始、雇用などの基準日は制度ごとに異なるため、要件を満たす時点と申請する時点を分けて確認してください。`}疑問点は自己判断で補わず、計画の概要を整理したうえで${body}へ相談してください。</p>
+
+<h2>${isSubsidy ? "対象経費と対象外経費を確認する" : "算定方法と対象外となる条件を確認する"}</h2>
+<p>${isSubsidy ? `対象経費として構造化できた内容は「${expenses}」です。費目名が一致するだけでは十分ではなく、その支出が対象事業に直接必要か、対象期間内に発生するか、証拠書類を残せるかを確認する必要があります。見積書、契約書、請求書、支払記録など、必要な証拠の種類も公募要領で確認してください。` : `金額の算定方法として構造化できた内容は「${calculationMethod}」です。算定の基礎となる費用、面積、人数、期間などがある場合は、どの時点の数値を使うのか、証明に必要な資料は何かを公式要綱で確認してください。`}</p>
+<p>${isSubsidy ? `対象外経費については「${exclusions}」という確認状況です。対象経費一覧に似た名称があっても、汎用性、消費税、支払時期、発注先、既存契約との関係などで対象外になる可能性があります。` : `交付対象外となる条件の詳細は、公式要綱の除外規定を確認する必要があります。確認できた交付・支給条件は「${paymentConditions}」です。`}判断が難しい支出や条件は、契約前に資料を提示して実施機関へ確認してください。</p>
+
+<h2>補助率・上限額と資金計画を整理する</h2>
+<p>${isSubsidy ? `公式ファクトとして確認できた補助率は「${subsidyRate}」、上限額または金額条件は「${subsidyCap}」です。補助率を掛けた金額がそのまま受け取れるとは限らず、対象経費の査定や上限額、予算、審査結果によって交付額が変わる可能性があります。` : `公式ファクトとして確認できた算定方法は「${calculationMethod}」、金額条件は「${subsidyCap}」です。要件を満たしていても、算定対象となる範囲や基準日によって金額が変わる可能性があります。`}申請前に受取額を確定収入として扱わないことが重要です。</p>
+<p>資金計画では、制度からの入金時期と実際の支払時期を分けて考えてください。採択や交付決定より先に自己資金で支払う必要があるか、実績報告後の精算払いかなど、資金繰りに影響する条件を公式資料で確認します。見積額が変わった場合の変更手続きや、申請額と実績額が異なる場合の扱いも、実施前に確認しておくと安心です。</p>
+
+<h2>申請期間と準備スケジュールを確認する</h2>
+<p>申請期間として確認できた内容は「${applicationPeriod}」です。期間の記載があっても、予算到達による早期終了、事前相談の期限、電子申請と郵送の違いなどが別に定められている場合があります。提出日だけを見るのではなく、準備開始から逆算し、確認・見積取得・書類作成・社内決裁に必要な時間を確保してください。</p>
+<p>申請方法として確認できた内容は「${applicationMethods}」です。提出前には最新版の様式を使っているか、必須欄が埋まっているか、添付資料と本文の数値が一致しているかを確認します。締切直前は問い合わせや電子申請が集中する可能性もあるため、不明点は早めに${body}へ確認してください。</p>
+<p>準備作業は、公式資料の確認、担当窓口への質問、見積や証明資料の収集、申請書の作成、最終照合に分けると管理しやすくなります。質問するときは、確認した資料名と該当箇所、自社の状況、判断できない点を具体的に伝えてください。回答を得た後は、申請書、事業計画、収支計画、添付資料の制度名・金額・期間が互いに一致しているかを改めて確認します。</p>
+
+<h2>申請前の確認表</h2>
+<p>申請準備では、制度説明を読むだけでなく、自社の計画と公式要件を一項目ずつ対応させることが大切です。次の表を使い、確認できた根拠資料と未確認事項を分けてください。未確認欄が残る場合は、そのまま申請書を書き始めず、公式ページや担当窓口で確認します。</p>
+<table><caption>申請前に確認する項目</caption><thead><tr><th>確認項目</th><th>今回の確認内容</th><th>次の行動</th></tr></thead><tbody>
+<tr><th>対象者</th><td>${applicants}</td><td>自社の所在地・事業区分と照合する</td></tr>
+<tr><th>${isSubsidy ? "対象事業" : "交付要件"}</th><td>${isSubsidy ? projects : eligibility}</td><td>要綱の条件を一項目ずつ確認する</td></tr>
+<tr><th>${isSubsidy ? "対象経費" : "算定方法"}</th><td>${isSubsidy ? expenses : calculationMethod}</td><td>根拠資料と算定範囲を確認する</td></tr>
+<tr><th>対象外・除外条件</th><td>${isSubsidy ? exclusions : paymentConditions}</td><td>除外規定を公式資料で確認する</td></tr>
+<tr><th>申請・実施時期</th><td>${applicationPeriod}</td><td>事前相談と提出期限を確認する</td></tr>
+</tbody></table>
+<p>確認結果は、担当者名、確認日、参照した資料名とともに社内で共有すると、申請書と実施内容のずれを防ぎやすくなります。電話などで確認した内容は、自社側でも記録を残し、必要に応じて書面で再確認してください。</p>
+<p>最終確認では、申請書だけを読むのではなく、見積書、事業計画、収支計画、実施スケジュールを横に並べます。同じ取組の名称や期間が資料ごとに異なっていないか、対象として申請する支出と対象外の支出を分けているか、担当者以外が読んでも根拠を追えるかを確認してください。判断の根拠を公式資料へ戻って説明できない項目は、提出前の確認事項として残します。</p>
+
+<h2>契約・発注・購入・着手前の注意点</h2>
+<p>${startRule}</p>
+<p>対象期間の判定は、契約日、発注日、納品日、請求日、支払日、事業開始日など、制度がどの日を基準にするかで変わります。すでに取引先と調整を始めている場合でも、正式な契約や発注に該当する行為がないかを確認してください。判断できない場合は、行動する前に計画と予定日を伝えて${body}へ確認します。</p>
+
+<h2>愛媛県内で相談・確認するときの準備</h2>
+<p>愛媛県内の事業者が相談するときは、制度名だけでなく、申請者の所在地と事業内容、予定する取組、概算費用、実施予定時期、確認したい論点を短く整理しておくと話が進みやすくなります。${body}の担当窓口に加え、必要に応じて地域の商工会議所、商工会、支援機関へ相談し、申請準備の進め方を確認してください。</p>
+<p>相談先によって役割は異なります。制度の正式な解釈と申請可否は実施機関へ確認し、事業計画や資金計画の整理は支援機関や専門家への相談を検討します。えひめ補助金ポータルの情報は候補探しと確認項目の整理に使い、最終判断は必ず公式資料に基づいて行ってください。</p>
+
+<h2>関連制度を比較して次の行動を決める</h2>
+<p>一つの制度だけで判断せず、対象目的、申請時期、対象経費、自己負担、実施期間を比較すると、自社の計画に合う制度を見つけやすくなります。ただし、同じ経費に複数制度を重ねて使えるかどうかは制度ごとに異なるため、併用を考える場合は両方の実施機関へ確認してください。</p>
+<p><a href="/ehime-subsidy/">愛媛県の補助金一覧を見る</a>、<a href="/simulator">補助金かんたん診断を使う</a>、<a href="/experts">専門家を探す</a>の順に確認すると、候補整理から相談まで進められます。条件が合わない場合も、申請内容を無理に制度へ合わせず、別の制度や次回公募を探してください。</p>
+
+<h2>まとめ：公式情報で最終確認してから申請する</h2>
+<p>${name}については、対象者、${isSubsidy ? "対象事業・対象経費、補助率・上限額" : "交付・支給要件、算定方法"}、申請期間を一つずつ照合することが重要です。確認できた内容だけを申請計画へ反映し、対象外条件や必要書類など確認できていない項目は、公募要領と担当窓口で補ってください。</p>
+<ul><li>自社が対象者のすべての条件を満たすか確認する</li><li>${isSubsidy ? "取組と支出が対象事業・対象経費に含まれるか確認する" : "交付要件と算定方法を確認する"}</li><li>申請期間と事前相談の時期を確認する</li><li>契約・発注・購入・着手前に実施機関へ確認する</li><li>最新版の公式資料と申請様式を使う</li></ul>
+<p>掲載情報は公式資料から構造化できた内容をもとに整理しています。制度内容や受付状況は変更される場合があります。申請前には${officialLink}。不明点を残したまま契約や発注へ進まず、最新の公募要領・交付要綱と担当窓口で最終確認してください。</p>
+`.trim();
+
+  return { title, metaDescription, content: ensureGeneratedInternalLinks(content) };
+};
+
 const countH2 = (value: string) => (String(value || "").match(/<h2[\s>]/gi) || []).length;
 
 const countTables = (value: string) => (String(value || "").match(/<table[\s>]/gi) || []).length;
@@ -2836,9 +2976,73 @@ ${extraInstructionBlock}
       }
     }
 
+    let currentMachineReview = buildMachineQualityReview(articleData, articleType, qualityReviewOptions);
+    const shouldUseStructuredFallback =
+      articleSourceFacts.articleType === "single_program" &&
+      (currentMachineReview.qualityScore < 80 ||
+        currentMachineReview.fatalIssues.length > 0 ||
+        currentMachineReview.unsupportedClaims.length > 0 ||
+        currentMachineReview.contradictoryClaims.length > 0);
+    const structuredFallback = {
+      attempted: shouldUseStructuredFallback,
+      applied: false,
+      rejectedReason: "",
+      qualityBefore: currentMachineReview.qualityScore,
+      qualityAfter: currentMachineReview.qualityScore,
+      before: getGeneratedArticleMetrics(articleData.content),
+      after: getGeneratedArticleMetrics(articleData.content),
+    };
+
+    if (shouldUseStructuredFallback) {
+      const fallback = buildFactGroundedArticle(articleSourceFacts);
+      const fallbackArticleData = {
+        ...articleData,
+        title: fallback.title,
+        seo_title: fallback.title,
+        meta_description: fallback.metaDescription,
+        content: fallback.content,
+      };
+      const fallbackMetrics = getGeneratedArticleMetrics(fallbackArticleData.content);
+      const fallbackReview = buildMachineQualityReview(
+        fallbackArticleData,
+        articleType,
+        qualityReviewOptions
+      );
+      const rejectionReasons: string[] = [];
+
+      structuredFallback.after = fallbackMetrics;
+      structuredFallback.qualityAfter = fallbackReview.qualityScore;
+
+      if (fallbackMetrics.textLength < requiredArticleLength) {
+        rejectionReasons.push(`本文が${requiredArticleLength.toLocaleString()}文字に届いていません`);
+      }
+      if (fallbackMetrics.h2Count < 10 || fallbackMetrics.h2Count > 12) {
+        rejectionReasons.push("H2が10〜12個の範囲ではありません");
+      }
+      if (fallbackMetrics.tableCount < 2) rejectionReasons.push("表が2つ未満です");
+      if (fallbackReview.fatalIssues.length > 0) rejectionReasons.push("致命的NGが残っています");
+      if (fallbackReview.unsupportedClaims.length > 0) {
+        rejectionReasons.push("根拠不明の主張が残っています");
+      }
+      if (fallbackReview.contradictoryClaims.length > 0) {
+        rejectionReasons.push("公式情報と矛盾する可能性が残っています");
+      }
+      if (fallbackReview.qualityScore <= currentMachineReview.qualityScore) {
+        rejectionReasons.push("ルールベース品質スコアが改善しませんでした");
+      }
+
+      if (rejectionReasons.length === 0) {
+        articleData = fallbackArticleData;
+        currentMachineReview = fallbackReview;
+        structuredFallback.applied = true;
+      } else {
+        structuredFallback.rejectedReason = `${Array.from(new Set(rejectionReasons)).join("、")}。`;
+      }
+    }
+
     let articleQualityReview = mergeQualityReviews(
       normalizeAiQualityReview(articleData.quality_review),
-      buildMachineQualityReview(articleData, articleType, qualityReviewOptions)
+      currentMachineReview
     );
 
     if (
@@ -2898,6 +3102,7 @@ ${extraInstructionBlock}
       imageSize,
       textModel,
       articleExpansion,
+      structuredFallback,
       sourceFacts: articleQualityReview.sourceFacts,
     });
   } catch (error) {
