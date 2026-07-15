@@ -818,6 +818,25 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
       }
 
+      const articleExpansion = data?.articleExpansion;
+      if (articleExpansion?.attempted) {
+        const before = articleExpansion.before || {};
+        const after = articleExpansion.after || {};
+        if (articleExpansion.applied) {
+          addLog(
+            `📝 自動補強: ${before.textLength || 0}文字 → ${after.textLength || 0}文字、` +
+              `H2 ${after.h2Count || 0}個、表 ${after.tableCount || 0}個`,
+            'info'
+          );
+        } else {
+          addLog(
+            `⚠️ 自動補強を適用できませんでした。` +
+              `${articleExpansion.error ? `理由: ${articleExpansion.error}` : '初稿より品質指標が改善しませんでした。'}`,
+            'warning'
+          );
+        }
+      }
+
       const articleQualityReview = buildQualityReviewForGeneratedArticle(data, articleData, {}, 'column');
 
       addLog(`✨ 執筆完了！タイトル: 「${articleData.title}」`, 'success');

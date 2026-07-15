@@ -387,6 +387,12 @@ const extractLabeledValue = (text = "", label = "") => {
   return match ? match[1].trim() : "";
 };
 
+const findSubsidyBlockById = (blocks: string[], subsidyId = "") => {
+  const normalizedId = String(subsidyId || "").trim();
+  if (!normalizedId) return "";
+  return blocks.find((block) => extractLabeledValue(block, "ID") === normalizedId) || "";
+};
+
 const extractUrlsFromText = (text = "") =>
   Array.from(new Set(String(text || "").match(/https?:\/\/[^\s<>"')]+/g) || []));
 
@@ -519,7 +525,7 @@ const buildSourceFacts = ({
   const officialText = stripHtml([sourceText || "", subsidiesText || ""].filter(Boolean).join("\n"));
   const existing = normalizeSourceFacts(sourceFacts || {});
   const blocks = String(subsidiesText || sourceText || "").split(/\n---\n/).map((block) => block.trim()).filter(Boolean);
-  const selectedBlock = blocks.find((block) => subsidyId && block.includes(`ID:${subsidyId}`)) || blocks[0] || officialText;
+  const selectedBlock = findSubsidyBlockById(blocks, subsidyId) || blocks[0] || officialText;
   const urls = extractUrlsFromText(officialText || selectedBlock);
   const officialUrlFromLabel = extractLabeledValue(selectedBlock, "公式URL");
   const officialUrl = officialUrlFromLabel && officialUrlFromLabel !== "なし"
@@ -547,7 +553,10 @@ const buildSourceFacts = ({
     applicationDeadline: existing.applicationDeadline || extractLabeledValue(selectedBlock, "締切"),
     officialSources,
   };
-  nextFacts.articleType = normalizeArticleType(articleType || nextFacts.articleType, {
+  const sourceAwareArticleType = articleType === "column" && existing.articleType
+    ? existing.articleType
+    : articleType || nextFacts.articleType;
+  nextFacts.articleType = normalizeArticleType(sourceAwareArticleType, {
     title,
     content: `${content || ""} ${officialText}`,
     category,
@@ -582,6 +591,21 @@ const sourceFactEvidenceText = (facts: SourceFacts) =>
 
 const normalizeClaimText = (value = "") => stripHtml(value).replace(/\s/g, "");
 
+const extractYenAmounts = (value = "") =>
+  Array.from(String(value || "").replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*(億円|万円|千円|円)/g))
+    .map((match) => {
+      const amount = Number(match[1]);
+      const multiplier = match[2] === "億円" ? 100000000 : match[2] === "万円" ? 10000 : match[2] === "千円" ? 1000 : 1;
+      return Number.isFinite(amount) ? amount * multiplier : null;
+    })
+    .filter((amount): amount is number => amount !== null);
+
+const hasEquivalentYenAmount = (left = "", right = "") => {
+  const leftAmounts = extractYenAmounts(left);
+  const rightAmounts = new Set(extractYenAmounts(right));
+  return leftAmounts.some((amount) => rightAmounts.has(amount));
+};
+
 const claimSupportedByFacts = (claim: string, sourceFacts: SourceFacts, factsText: string) => {
   const normalizedClaim = normalizeClaimText(claim);
   const normalizedFacts = normalizeClaimText(factsText);
@@ -593,7 +617,11 @@ const claimSupportedByFacts = (claim: string, sourceFacts: SourceFacts, factsTex
   const deadline = normalizeClaimText(sourceFacts.applicationDeadline);
 
   if (/補助率/.test(claim) && rate && normalizedClaim.includes(rate)) return true;
-  if (/(上限額|補助上限|上限)/.test(claim) && cap && normalizedClaim.includes(cap)) return true;
+  if (
+    /(上限額|補助上限|上限)/.test(claim) &&
+    cap &&
+    (normalizedClaim.includes(cap) || hasEquivalentYenAmount(claim, sourceFacts.subsidyCap))
+  ) return true;
   if (/(締切|申請締切|公募期間|受付期間)/.test(claim) && deadline) {
     const monthMatch = normalizedClaim.match(/20\d{2}年\d{1,2}月/);
     if (normalizedClaim.includes(deadline) || (monthMatch && deadline.includes(monthMatch[0]))) return true;
@@ -696,11 +724,14 @@ const buildMachineQualityReview = (
     articleType,
     subsidyId: options.subsidyId,
   });
-  const normalizedArticleType = normalizeArticleType(articleType || sourceFacts.articleType, {
-    title,
-    content: text,
-    category: articleData.category || "",
-  });
+  const normalizedArticleType = normalizeArticleType(
+    articleType === "column" ? sourceFacts.articleType : articleType || sourceFacts.articleType,
+    {
+      title,
+      content: text,
+      category: articleData.category || "",
+    }
+  );
   sourceFacts.articleType = normalizedArticleType;
   const fatalIssues: string[] = [];
   const warnings: string[] = [];
@@ -2228,7 +2259,14 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 ${extraInstructions}
 `
       : "";
-    const suppliedFactsBlock = `
+    const suppliedFactsBlock = isAutoMode
+      ? `
+【自動選択モードの公式ファクト】
+選んだ subsidy_id と同じ ID のデータブロックだけを、その記事の公式ファクトとして使用してください。
+別の ID の制度名、機関、対象者、対象経費、上限額、締切、公式URLを混ぜないでください。
+選択したブロックにない具体情報は推測せず、quality_review.missingFacts に返してください。
+`.trim()
+      : `
 【構造化済み公式ファクト suppliedFacts】
 ${JSON.stringify(suppliedFacts, null, 2)}
 
@@ -2529,7 +2567,31 @@ ${extraInstructionBlock}
     if (preferredCategory) {
       articleData.category = preferredCategory;
     }
+    if (isAutoMode && !preferredCategory && articleData.category === "特集") {
+      articleData.category = "補助金情報";
+    }
     articleData.tags = Array.isArray(articleData.tags) ? articleData.tags : [];
+    const autoSourceBlocks = String(subsidiesText || "").split(/\n---\n/).map((block) => block.trim()).filter(Boolean);
+    const selectedAutoSourceBlock = isAutoMode
+      ? findSubsidyBlockById(autoSourceBlocks, articleData.subsidy_id)
+      : "";
+
+    if (isAutoMode && !selectedAutoSourceBlock) {
+      return jsonResponse({
+        error: `AIが選択した subsidy_id（${articleData.subsidy_id || "未設定"}）に対応する公式データを確認できませんでした。`,
+      });
+    }
+
+    const articleSourceFacts = isAutoMode
+      ? buildSourceFacts({
+          subsidiesText: selectedAutoSourceBlock,
+          title: articleData.title,
+          content: articleData.content,
+          category: articleData.category,
+          articleType: "single_program",
+          subsidyId: articleData.subsidy_id,
+        })
+      : suppliedFacts;
     const requiredArticleLength = articleType === "feature" || articleData.category === "特集" ? 6000 : 4000;
     const initialArticleMetrics = getGeneratedArticleMetrics(articleData.content);
     const shouldExpandArticle =
@@ -2551,7 +2613,7 @@ ${extraInstructionBlock}
         title: articleData.title,
         content: articleData.content,
         articleType: articleType === "feature" || articleData.category === "特集" ? "feature" : articleType,
-        sourceFacts: suppliedFacts,
+        sourceFacts: articleSourceFacts,
       });
 
       articleExpansion.error = expansionResult.error;
@@ -2571,7 +2633,7 @@ ${extraInstructionBlock}
     const articleQualityReview = mergeQualityReviews(
       normalizeAiQualityReview(articleData.quality_review),
       buildMachineQualityReview(articleData, articleType, {
-        sourceFacts: suppliedFacts,
+        sourceFacts: articleSourceFacts,
         sourceText,
         subsidiesText,
         subsidyId: articleData.subsidy_id,

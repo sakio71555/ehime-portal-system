@@ -312,6 +312,12 @@ const extractLabeledValue = (text = '', label = '') => {
   return match ? match[1].trim() : '';
 };
 
+const findSubsidyBlockById = (blocks = [], subsidyId = '') => {
+  const normalizedId = String(subsidyId || '').trim();
+  if (!normalizedId) return '';
+  return blocks.find((block) => extractLabeledValue(block, 'ID') === normalizedId) || '';
+};
+
 const extractUrlsFromText = (text = '') =>
   uniqueList(String(text || '').match(/https?:\/\/[^\s<>"')]+/g) || []);
 
@@ -421,10 +427,7 @@ export const buildColumnSourceFacts = (input = {}) => {
     .split(/\n---\n/)
     .map((block) => block.trim())
     .filter(Boolean);
-  const selectedBlock =
-    blocks.find((block) => input.subsidyId && block.includes(`ID:${input.subsidyId}`)) ||
-    blocks[0] ||
-    sourceText;
+  const selectedBlock = findSubsidyBlockById(blocks, input.subsidyId) || blocks[0] || sourceText;
   const urls = extractUrlsFromText(sourceText || selectedBlock);
   const officialUrlFromLabel = extractLabeledValue(selectedBlock, '公式URL');
   const officialUrl =
@@ -464,7 +467,10 @@ export const buildColumnSourceFacts = (input = {}) => {
     officialSources,
   };
 
-  const detectedArticleType = normalizeColumnArticleType(input.articleType || nextFacts.articleType, {
+  const sourceAwareArticleType = input.articleType === 'column' && existingFacts.articleType
+    ? existingFacts.articleType
+    : input.articleType || nextFacts.articleType;
+  const detectedArticleType = normalizeColumnArticleType(sourceAwareArticleType, {
     title,
     content: `${contentText} ${sourceText}`,
     category: input.category,
@@ -555,9 +561,24 @@ const formatMissingFact = (field) => {
 const calculateSourceCoverageScore = (missingFacts = []) =>
   Math.max(0, Math.min(100, 100 - uniqueList(missingFacts).length * 12));
 
+const extractYenAmounts = (value = '') =>
+  Array.from(String(value || '').replace(/,/g, '').matchAll(/(\d+(?:\.\d+)?)\s*(億円|万円|千円|円)/g))
+    .map((match) => {
+      const amount = Number(match[1]);
+      const multiplier = match[2] === '億円' ? 100000000 : match[2] === '万円' ? 10000 : match[2] === '千円' ? 1000 : 1;
+      return Number.isFinite(amount) ? amount * multiplier : null;
+    })
+    .filter((amount) => amount !== null);
+
+const hasEquivalentYenAmount = (left = '', right = '') => {
+  const leftAmounts = extractYenAmounts(left);
+  const rightAmounts = new Set(extractYenAmounts(right));
+  return leftAmounts.some((amount) => rightAmounts.has(amount));
+};
+
 const fieldSupported = (factsText = '', value = '') => {
   const needle = stripHtmlToText(value);
-  return Boolean(needle && factsText.includes(needle));
+  return Boolean(needle && (factsText.includes(needle) || hasEquivalentYenAmount(factsText, needle)));
 };
 
 const extractNumericClaims = (text = '') =>
@@ -576,7 +597,11 @@ const claimSupportedByFacts = (claim = '', sourceFacts = {}, factsText = '') => 
   const deadline = normalizeClaimText(sourceFacts.applicationDeadline);
 
   if (/補助率/.test(claim) && rate && normalizedClaim.includes(rate)) return true;
-  if (/(上限額|補助上限|上限)/.test(claim) && cap && normalizedClaim.includes(cap)) return true;
+  if (
+    /(上限額|補助上限|上限)/.test(claim) &&
+    cap &&
+    (normalizedClaim.includes(cap) || hasEquivalentYenAmount(claim, sourceFacts.subsidyCap))
+  ) return true;
   if (/(締切|申請締切|公募期間|受付期間)/.test(claim) && deadline) {
     if (normalizedClaim.includes(deadline) || deadline.includes(normalizedClaim.replace(/.*?(20\d{2}年\d{1,2}月).*/, '$1'))) {
       return true;
@@ -812,11 +837,14 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     articleType: options.articleType,
     subsidyId: column.subsidy_id,
   });
-  const articleType = normalizeColumnArticleType(options.articleType || sourceFacts.articleType, {
-    title,
-    content: text,
-    category: column.category,
-  });
+  const articleType = normalizeColumnArticleType(
+    options.articleType === 'column' ? sourceFacts.articleType : options.articleType || sourceFacts.articleType,
+    {
+      title,
+      content: text,
+      category: column.category,
+    }
+  );
   sourceFacts.articleType = articleType;
   const isFeature = articleType === 'feature' || column.category === '特集';
   const fatalIssues = [];

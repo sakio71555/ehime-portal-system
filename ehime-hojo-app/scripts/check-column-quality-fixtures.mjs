@@ -1,4 +1,5 @@
 import {
+  buildColumnSourceFacts,
   mergeColumnQualityReview,
   reviewColumnQuality,
 } from '../src/utils/columnQualityValidator.js';
@@ -148,6 +149,32 @@ const semanticReview = mergeColumnQualityReview(
     humanReviewed: true,
   }
 );
+const selectedFacts = buildColumnSourceFacts({
+  subsidiesText: [
+    'ID:12 | タイトル:制度12 | 機関:愛媛県 | 対象:県内事業者 | 経費:設備費 | 上限:100万円 | 締切:2026年8月1日 | 公式URL:https://example.ehime.jp/12 | 概要:制度12の概要',
+    'ID:123 | タイトル:制度123 | 機関:松山市 | 対象:市内事業者 | 経費:広報費 | 上限:200万円 | 締切:2026年9月1日 | 公式URL:https://example.ehime.jp/123 | 概要:制度123の概要',
+  ].join('\n---\n'),
+  subsidyId: '12',
+  articleType: 'single_program',
+  title: '制度12の確認ポイント',
+});
+const equivalentMoneyFacts = {
+  ...officialSourceFacts,
+  subsidyCap: '上限6,000万円',
+  officialSources: officialSourceFacts.officialSources.map((source) => ({
+    ...source,
+    evidence: source.evidence.replaceAll('上限100万円', '上限6,000万円'),
+  })),
+};
+const equivalentMoneyArticle = {
+  ...goodArticle,
+  content: goodArticle.content.replaceAll('上限100万円', '上限60,000,000円'),
+};
+const equivalentMoneyReview = reviewColumnQuality(equivalentMoneyArticle, {
+  articleType: 'single_program',
+  sourceFacts: equivalentMoneyFacts,
+  humanReviewed: true,
+});
 
 assertCondition(badReview.finalScore <= 39, '低品質fixtureは39点以下であるべきです。', badReview);
 assertCondition(badReview.grade === 'D', '低品質fixtureはD判定であるべきです。', badReview);
@@ -177,6 +204,16 @@ assertCondition(
   'APIレビューが90点未満の場合は公開可能にしてはいけません。',
   semanticReview
 );
+assertCondition(
+  selectedFacts.officialName === '制度12' && selectedFacts.subsidyCap === '100万円',
+  '補助金IDは部分一致ではなく、選択したIDのデータブロックだけを使うべきです。',
+  selectedFacts
+);
+assertCondition(
+  equivalentMoneyReview.unsupportedClaims.length === 0 && equivalentMoneyReview.contradictoryClaims.length === 0,
+  '6,000万円と60,000,000円は同額として扱うべきです。',
+  equivalentMoneyReview
+);
 
 console.log(JSON.stringify({
   bad: {
@@ -204,5 +241,13 @@ console.log(JSON.stringify({
     finalScore: semanticReview.finalScore,
     usedApi: semanticReview.llmReview.usedApi,
     publishAllowed: semanticReview.publishAllowed,
+  },
+  selectedSourceFacts: {
+    officialName: selectedFacts.officialName,
+    subsidyCap: selectedFacts.subsidyCap,
+  },
+  equivalentMoney: {
+    unsupportedClaims: equivalentMoneyReview.unsupportedClaims.length,
+    contradictoryClaims: equivalentMoneyReview.contradictoryClaims.length,
   },
 }, null, 2));
