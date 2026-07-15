@@ -1803,6 +1803,7 @@ serve(async (req: Request) => {
     const imageOnly = body?.imageOnly === true;
     const qualityReviewOnly = body?.qualityReviewOnly === true;
     const repairArticleOnly = body?.repairArticleOnly === true;
+    const deferEnhancements = body?.deferEnhancements === true;
     const useLlmReview = body?.useLlmReview === true;
     const confirmUsePaidApi = body?.confirmUsePaidApi === true;
     const thumbnailText =
@@ -1956,7 +1957,7 @@ serve(async (req: Request) => {
         body: JSON.stringify({
           model: repairTextModel,
           temperature: 0.3,
-          max_completion_tokens: 12000,
+          max_completion_tokens: 9000,
           response_format: {
             type: "json_schema",
             json_schema: {
@@ -2153,6 +2154,16 @@ ${JSON.stringify({
       });
     }
 
+    const articleLengthInstruction = deferEnhancements
+      ? "- このリクエストは第一段階の構造化初稿です。本文は1,800〜2,400文字、H2は6〜8個、表は最低1つにまとめてください。後続の別リクエストで4,000文字以上へ補強します。"
+      : "- 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。";
+    const articleStructureInstruction = deferEnhancements
+      ? "- 第一段階では必須内容を6〜8個のH2へ整理し、各H2に具体的な説明を入れてください。薄い見出しを量産しないでください。"
+      : "- H2は10〜12個を目安にし、各H2に原則2段落以上の具体的な説明を入れてください。薄い見出しを量産しないでください。";
+    const tableInstruction = deferEnhancements
+      ? "- 第一段階の表は最低1つ入れてください。"
+      : "- 表を最低2つ以上入れてください。";
+
     const systemPrompt = `
 あなたは、愛媛県内の中小企業・個人事業主向けに補助金・助成金情報をわかりやすく整理するWebメディアの編集者です。
 AIの役割は公開前の下書き作成です。公開前に人間が公式情報、断定表現、独自性を確認する前提で、確認しやすい記事を作ってください。
@@ -2160,9 +2171,9 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 【重要ルール】
 - 読者は愛媛県内の事業者です。
 - 公式ページや入力データの要約・言い換えだけで終わらせず、読者が次に判断できる整理を加えてください。
-- 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。
-- H2は10〜12個を目安にし、各H2に原則2段落以上の具体的な説明を入れてください。薄い見出しを量産しないでください。
-- 表を最低2つ以上入れてください。
+${articleLengthInstruction}
+${articleStructureInstruction}
+${tableInstruction}
 - チェックリスト、CTA、内部リンクを本文に自然に入れてください。
 - 使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
 - 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
@@ -2364,7 +2375,7 @@ ${extraInstructionBlock}
       body: JSON.stringify({
         model: textModel,
         temperature: 0.7,
-        max_completion_tokens: 12000,
+        max_completion_tokens: deferEnhancements ? 6000 : 12000,
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -2643,10 +2654,11 @@ ${extraInstructionBlock}
     };
     const initialMachineReview = buildMachineQualityReview(articleData, articleType, qualityReviewOptions);
     const shouldExpandArticle =
-      initialArticleMetrics.textLength < requiredArticleLength ||
-      initialArticleMetrics.h2Count < 10 ||
-      initialArticleMetrics.h2Count > 12 ||
-      initialArticleMetrics.tableCount < 2;
+      !deferEnhancements &&
+      (initialArticleMetrics.textLength < requiredArticleLength ||
+        initialArticleMetrics.h2Count < 10 ||
+        initialArticleMetrics.h2Count > 12 ||
+        initialArticleMetrics.tableCount < 2);
     const articleExpansion = {
       attempted: shouldExpandArticle,
       applied: false,
@@ -2710,6 +2722,7 @@ ${extraInstructionBlock}
     );
 
     if (
+      !deferEnhancements &&
       isAutoMode &&
       articleQualityReview.ruleBasedScore >= 80 &&
       articleQualityReview.fatalIssues.length === 0 &&
@@ -2733,17 +2746,24 @@ ${extraInstructionBlock}
     articleData.quality_review = articleQualityReview;
     const articleQualityWarnings = buildArticleQualityWarnings(articleQualityReview);
 
-    const { base64Image, imageError, imageUrl, imageDebug } = await generateImage({
-      openAiKey,
-      imageModel,
-      imageQuality,
-      imageSize,
-      imageTheme: articleData.thumbnail_text,
-      imageTitle: articleData.title,
-      imageCategory: articleData.category,
-      articleType,
-      contentContext: stripHtml(articleData.content).slice(0, 280),
-    });
+    const { base64Image, imageError, imageUrl, imageDebug } = deferEnhancements
+      ? {
+          base64Image: "",
+          imageError: "",
+          imageUrl: "",
+          imageDebug: { deferred: true },
+        }
+      : await generateImage({
+          openAiKey,
+          imageModel,
+          imageQuality,
+          imageSize,
+          imageTheme: articleData.thumbnail_text,
+          imageTitle: articleData.title,
+          imageCategory: articleData.category,
+          articleType,
+          contentContext: stripHtml(articleData.content).slice(0, 280),
+        });
 
     return jsonResponse({
       articleData,

@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 import {
   buildColumnSourceFacts,
-  COLUMN_GENERATION_PROMPT_RULES,
   PUBLISH_QUALITY_CHECKS,
   mergeColumnQualityReview,
   reviewColumnQuality,
@@ -771,7 +770,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
     if (
       !window.confirm(
-        '現在の「公開中」の補助金データから、公式情報が比較的揃った記事化候補をAIが1件選び、公開前確認用の下書きと画像を生成します。\n本文生成、必要時の補強、合格圏の記事に対する品質レビューで外部API料金が発生します。追加レビューは最大1回です。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約1〜3分かかります）'
+        '現在の「公開中」の補助金データから、公式情報が比較的揃った記事化候補をAIが1件選び、公開前確認用の下書きと画像を生成します。\n初稿、本文補強、条件を満たした場合の品質レビュー、画像生成を段階的に実行するため、外部API料金が発生します。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約3〜6分かかります）'
       )
     ) {
       return;
@@ -817,46 +816,132 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         )
         .join('\n---\n');
 
-      addLog('AIが記事化候補を選び、公式確認導線を含む下書きを作成しています（約1〜3分）...', 'info');
+      addLog('第1段階: AIが記事化候補を選び、根拠付きの構造化初稿を作成しています...', 'info');
 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
           subsidiesText: dataText,
-          extraInstructions: COLUMN_GENERATION_PROMPT_RULES,
+          deferEnhancements: true,
         },
       });
 
       if (error) throw new Error(`サーバー通信エラー: ${error.message}`);
       if (data?.error) throw new Error(data.error);
 
-      const articleData = data?.articleData;
-      const base64Image = getGeneratedBase64Image(data);
-      const imageErrorMessage = getImageErrorMessage(data);
+      let articleData = data?.articleData;
       if (!articleData) {
         throw new Error('Edge Functionから記事データが返ってきませんでした。');
       }
 
-      const articleExpansion = data?.articleExpansion;
-      if (articleExpansion?.attempted) {
-        const before = articleExpansion.before || {};
-        const after = articleExpansion.after || {};
-        if (articleExpansion.applied) {
+      let articleQualityReview = buildQualityReviewForGeneratedArticle(data, articleData, {}, 'single_program');
+      const initialTextLength = stripHtmlToText(articleData.content || '').length;
+      addLog(
+        `✅ 第1段階完了: ${initialTextLength}文字 / ルール品質 ${articleQualityReview.ruleBasedScore || 0}/100`,
+        'success'
+      );
+
+      addLog('第2段階: 公式ファクトを固定したまま、4,000文字以上へ本文を補強しています...', 'info');
+      try {
+        const { data: repairData, error: repairError } = await supabase.functions.invoke('auto-column', {
+          body: {
+            repairArticleOnly: true,
+            confirmUsePaidApi: true,
+            originalTitle: articleData.title || '',
+            originalBody: articleData.content || '',
+            seo_title: articleData.seo_title || '',
+            meta_description: articleData.meta_description || '',
+            category: articleData.category || '',
+            tags: articleData.tags || [],
+            articleType: 'single_program',
+            sourceFacts: articleQualityReview.sourceFacts,
+            ruleBasedReview: articleQualityReview,
+            subsidy_id: articleData.subsidy_id || '',
+            repairIteration: 1,
+          },
+        });
+
+        if (repairError) throw new Error(`サーバー通信エラー: ${repairError.message}`);
+        if (repairData?.error) throw new Error(repairData.error);
+        if (!repairData?.articleData) throw new Error('補強済み記事データが返ってきませんでした。');
+
+        const repairedArticle = repairData.articleData;
+        const repairedReview = buildQualityReviewForGeneratedArticle(
+          repairData,
+          repairedArticle,
+          {},
+          'single_program'
+        );
+        const repairedTextLength = stripHtmlToText(repairedArticle.content || '').length;
+        const isGroundedRepair =
+          (repairedReview.unsupportedClaims || []).length === 0 &&
+          (repairedReview.contradictoryClaims || []).length === 0;
+        const improvesQuality = repairedReview.qualityScore > articleQualityReview.qualityScore;
+
+        if (isGroundedRepair && improvesQuality) {
+          articleData = repairedArticle;
+          articleQualityReview = repairedReview;
           addLog(
-            `📝 自動補強: ${before.textLength || 0}文字 → ${after.textLength || 0}文字、` +
-              `H2 ${after.h2Count || 0}個、表 ${after.tableCount || 0}個、` +
-              `品質 ${articleExpansion.qualityBefore || 0}点 → ${articleExpansion.qualityAfter || 0}点`,
-            'info'
+            `✅ 第2段階完了: ${initialTextLength}文字 → ${repairedTextLength}文字、` +
+              `品質 ${data?.articleQualityReview?.qualityScore || 0}点 → ${repairedReview.qualityScore}点`,
+            'success'
           );
         } else {
-          addLog(
-            `⚠️ 自動補強を適用できませんでした。` +
-              `${articleExpansion.rejectedReason ? `理由: ${articleExpansion.rejectedReason}` : articleExpansion.error ? `理由: ${articleExpansion.error}` : '初稿より品質指標が改善しませんでした。'}`,
-            'warning'
-          );
+          const reasons = [
+            !isGroundedRepair ? '根拠不明または矛盾する主張が残った' : '',
+            !improvesQuality ? 'ルール品質スコアが初稿を上回らなかった' : '',
+          ].filter(Boolean);
+          addLog(`⚠️ 第2段階の補強案は不採用です。${reasons.join(' / ')}`, 'warning');
         }
+      } catch (repairError) {
+        addLog(`⚠️ 本文補強を完了できませんでした。初稿を保存対象として続行します。${repairError.message}`, 'warning');
       }
 
-      const articleQualityReview = buildQualityReviewForGeneratedArticle(data, articleData, {}, 'column');
+      if (articleQualityReview.ruleBasedScore >= 80 && hasUsableOfficialSource(articleQualityReview.sourceFacts)) {
+        addLog('第3段階: API品質レビューで検索意図・タイトル整合性・事実リスクを確認しています...', 'info');
+        try {
+          const { data: reviewData, error: reviewError } = await supabase.functions.invoke('auto-column', {
+            body: {
+              qualityReviewOnly: true,
+              useLlmReview: true,
+              confirmUsePaidApi: true,
+              title: articleData.title || '',
+              seo_title: articleData.seo_title || '',
+              content: articleData.content || '',
+              category: articleData.category || '',
+              articleType: 'single_program',
+              sourceFacts: articleQualityReview.sourceFacts,
+              ruleBasedReview: articleQualityReview,
+            },
+          });
+
+          if (reviewError) throw new Error(`サーバー通信エラー: ${reviewError.message}`);
+          if (reviewData?.error && !reviewData?.articleQualityReview) throw new Error(reviewData.error);
+
+          if (reviewData?.usedApi && reviewData?.articleQualityReview) {
+            articleQualityReview = buildQualityReviewForGeneratedArticle(
+              reviewData,
+              articleData,
+              {},
+              'single_program'
+            );
+            addLog(
+              `✅ 第3段階完了: 意味評価 ${articleQualityReview.llmReview?.semanticScore || 0}/100、` +
+                `最終品質 ${articleQualityReview.qualityScore}/100`,
+              'success'
+            );
+          } else {
+            addLog(`⚠️ API品質レビューは未実行です。${reviewData?.error || ''}`, 'warning');
+          }
+        } catch (reviewError) {
+          addLog(`⚠️ API品質レビューを完了できませんでした。ルール採点で続行します。${reviewError.message}`, 'warning');
+        }
+      } else {
+        addLog(
+          `⚠️ 第3段階は見送りました。ルール品質 ${articleQualityReview.ruleBasedScore || 0}/100、` +
+            `公式根拠 ${hasUsableOfficialSource(articleQualityReview.sourceFacts) ? 'あり' : '不足'}。`,
+          'warning'
+        );
+      }
 
       if (articleQualityReview.llmReview?.usedApi) {
         addLog(
@@ -882,15 +967,26 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
       let finalThumbnailUrl = '';
 
-      if (base64Image) {
-        addLog('🎨 アイキャッチ画像を保存しています...', 'info');
+      addLog('第4段階: アイキャッチ画像を生成しています...', 'info');
+      try {
+        const { data: imageData, error: imageInvokeError } = await supabase.functions.invoke('auto-column', {
+          body: {
+            ...buildImageOnlyBody(articleData),
+            articleType: 'single_program',
+          },
+        });
+
+        if (imageInvokeError) throw new Error(`サーバー通信エラー: ${imageInvokeError.message}`);
+        if (imageData?.error) throw new Error(imageData.error);
+
+        const base64Image = getGeneratedBase64Image(imageData);
+        const imageErrorMessage = getImageErrorMessage(imageData);
+        if (!base64Image) throw new Error(imageErrorMessage || '画像データが返ってきませんでした。');
+
         finalThumbnailUrl = await uploadGeneratedImage(base64Image, 'column');
-        addLog('🖼 画像が完成しました！データベースに保存しています...', 'success');
-      } else {
-        addLog(
-          `⚠️ 画像データは返ってきませんでした。記事のみ保存します。${imageErrorMessage ? ` 原因: ${imageErrorMessage}` : ''}`,
-          'warning'
-        );
+        addLog('✅ 第4段階完了: 画像を保存しました。', 'success');
+      } catch (imageError) {
+        addLog(`⚠️ 画像生成を完了できませんでした。記事のみ保存します。${imageError.message}`, 'warning');
       }
 
       addLog('💾 記事と画像をシステムに登録しています...', 'info');
