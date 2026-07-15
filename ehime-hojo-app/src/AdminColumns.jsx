@@ -31,7 +31,7 @@ const scoreSubsidyForColumn = (subsidy = {}) =>
 const getCandidateOfficialUrl = (subsidy = {}) =>
   String(subsidy.official_url || subsidy.source_url || '').trim();
 
-const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, officialText, resolvedUrl }) => {
+const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, resolvedUrl }) => {
   const checkedAt = new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
@@ -39,18 +39,36 @@ const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, officialText, r
     day: '2-digit',
   }).format(new Date());
   const evidenceParts = [
-    extractedFacts.evidence?.application_period_text,
-    extractedFacts.evidence?.amount_text,
-    extractedFacts.evidence?.subsidy_rate_text,
-    extractedFacts.evidence?.target_entities_arr,
-    extractedFacts.evidence?.target_expenses_arr,
-    extractedFacts.evidence?.eligibility_conditions_arr,
-    extractedFacts.evidence?.calculation_method_text,
-    extractedFacts.evidence?.payment_conditions_arr,
-    extractedFacts.evidence?.application_methods_arr,
-    extractedFacts.evidence?.pre_start_rule_text,
-    extractedFacts.summary,
-    officialText,
+    extractedFacts.title ? `正式制度名: ${extractedFacts.title}` : '',
+    extractedFacts.organization ? `実施機関: ${extractedFacts.organization}` : '',
+    extractedFacts.evidence?.application_period_text
+      ? `申請期間: ${extractedFacts.evidence.application_period_text}`
+      : '',
+    extractedFacts.evidence?.amount_text ? `金額: ${extractedFacts.evidence.amount_text}` : '',
+    extractedFacts.evidence?.subsidy_rate_text
+      ? `補助率: ${extractedFacts.evidence.subsidy_rate_text}`
+      : '',
+    extractedFacts.evidence?.target_entities_arr
+      ? `対象者: ${extractedFacts.evidence.target_entities_arr}`
+      : '',
+    extractedFacts.evidence?.target_expenses_arr
+      ? `対象経費: ${extractedFacts.evidence.target_expenses_arr}`
+      : '',
+    extractedFacts.evidence?.eligibility_conditions_arr
+      ? `交付・支給要件: ${extractedFacts.evidence.eligibility_conditions_arr}`
+      : '',
+    extractedFacts.evidence?.calculation_method_text
+      ? `算定方法: ${extractedFacts.evidence.calculation_method_text}`
+      : '',
+    extractedFacts.evidence?.payment_conditions_arr
+      ? `支給条件: ${extractedFacts.evidence.payment_conditions_arr}`
+      : '',
+    extractedFacts.evidence?.application_methods_arr
+      ? `申請方法: ${extractedFacts.evidence.application_methods_arr}`
+      : '',
+    extractedFacts.evidence?.pre_start_rule_text
+      ? `着手時期: ${extractedFacts.evidence.pre_start_rule_text}`
+      : '',
   ].filter(Boolean);
   const officialUrl = resolvedUrl || extractedFacts.official_url || getCandidateOfficialUrl(subsidy);
 
@@ -934,7 +952,6 @@ export default function AdminColumns({ initialMode = 'columns' }) {
           const sourceFacts = buildExtractedCandidateFacts({
             subsidy,
             extractedFacts: extractedData?.facts || {},
-            officialText,
             resolvedUrl,
           });
           const readiness = getColumnFactReadiness(sourceFacts, {
@@ -951,8 +968,6 @@ export default function AdminColumns({ initialMode = 'columns' }) {
           if (readiness.ready) {
             preparedCandidate = {
               subsidy,
-              officialText,
-              resolvedUrl,
               sourceFacts: readiness.sourceFacts,
               readiness,
             };
@@ -969,7 +984,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         throw new Error('公式ファクト充足率80点以上の記事候補が見つかりませんでした。記事生成と画像生成は実行していません。');
       }
 
-      const { subsidy: selectedSubsidy, officialText, sourceFacts, readiness } = preparedCandidate;
+      const { subsidy: selectedSubsidy, sourceFacts, readiness } = preparedCandidate;
       addLog(
         `✅ 記事化候補を確定: 「${sourceFacts.officialName || selectedSubsidy.title}」` +
           `（${readiness.programKindLabel}・ファクト充足率 ${readiness.score}/100）`,
@@ -981,12 +996,11 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         body: {
           title: sourceFacts.officialName || selectedSubsidy.title || '',
           requestedTitle: sourceFacts.officialName || selectedSubsidy.title || '',
-          sourceText: officialText,
           sourceFacts,
           articleType: 'single_program',
           category: '補助金情報',
           subsidy_id: String(selectedSubsidy.id || ''),
-          deferEnhancements: true,
+          deferImage: true,
         },
       });
 
@@ -1000,66 +1014,83 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
       let articleQualityReview = buildQualityReviewForGeneratedArticle(data, articleData, {}, 'single_program');
       const initialTextLength = stripHtmlToText(articleData.content || '').length;
+      if (data?.articleExpansion?.attempted) {
+        addLog(
+          data.articleExpansion.applied
+            ? `✅ 第1段階内の自動補強を適用しました（${data.articleExpansion.before?.textLength || 0}文字 → ${data.articleExpansion.after?.textLength || initialTextLength}文字）。`
+            : `⚠️ 第1段階内の自動補強は不採用です。${data.articleExpansion.rejectedReason || data.articleExpansion.error || ''}`,
+          data.articleExpansion.applied ? 'success' : 'warning'
+        );
+      }
       addLog(
         `✅ 第1段階完了: ${initialTextLength}文字 / ルール品質 ${articleQualityReview.ruleBasedScore || 0}/100`,
         'success'
       );
 
-      addLog('第2段階: 公式ファクトを固定したまま、4,000文字以上へ本文を補強しています...', 'info');
-      try {
-        const { data: repairData, error: repairError } = await supabase.functions.invoke('auto-column', {
-          body: {
-            repairArticleOnly: true,
-            confirmUsePaidApi: true,
-            originalTitle: articleData.title || '',
-            originalBody: articleData.content || '',
-            seo_title: articleData.seo_title || '',
-            meta_description: articleData.meta_description || '',
-            category: articleData.category || '',
-            tags: articleData.tags || [],
-            articleType: 'single_program',
-            sourceText: officialText,
-            sourceFacts: articleQualityReview.sourceFacts,
-            ruleBasedReview: articleQualityReview,
-            subsidy_id: articleData.subsidy_id || '',
-            repairIteration: 1,
-          },
-        });
+      const needsRepair =
+        articleQualityReview.ruleBasedScore < 80 ||
+        articleQualityReview.fatalIssues.length > 0 ||
+        (articleQualityReview.unsupportedClaims || []).length > 0 ||
+        (articleQualityReview.contradictoryClaims || []).length > 0;
 
-        if (repairError) throw new Error(`サーバー通信エラー: ${repairError.message}`);
-        if (repairData?.error) throw new Error(repairData.error);
-        if (!repairData?.articleData) throw new Error('補強済み記事データが返ってきませんでした。');
+      if (needsRepair) {
+        addLog('第2段階: 公式ファクトを固定したまま、4,000文字以上へ本文を補強しています...', 'info');
+        try {
+          const { data: repairData, error: repairError } = await supabase.functions.invoke('auto-column', {
+            body: {
+              repairArticleOnly: true,
+              confirmUsePaidApi: true,
+              originalTitle: articleData.title || '',
+              originalBody: articleData.content || '',
+              seo_title: articleData.seo_title || '',
+              meta_description: articleData.meta_description || '',
+              category: articleData.category || '',
+              tags: articleData.tags || [],
+              articleType: 'single_program',
+              sourceFacts: articleQualityReview.sourceFacts,
+              ruleBasedReview: articleQualityReview,
+              subsidy_id: articleData.subsidy_id || '',
+              repairIteration: 1,
+            },
+          });
 
-        const repairedArticle = repairData.articleData;
-        const repairedReview = buildQualityReviewForGeneratedArticle(
-          repairData,
-          repairedArticle,
-          {},
-          'single_program'
-        );
-        const repairedTextLength = stripHtmlToText(repairedArticle.content || '').length;
-        const isGroundedRepair =
-          (repairedReview.unsupportedClaims || []).length === 0 &&
-          (repairedReview.contradictoryClaims || []).length === 0;
-        const improvesQuality = repairedReview.qualityScore > articleQualityReview.qualityScore;
+          if (repairError) throw new Error(`サーバー通信エラー: ${repairError.message}`);
+          if (repairData?.error) throw new Error(repairData.error);
+          if (!repairData?.articleData) throw new Error('補強済み記事データが返ってきませんでした。');
 
-        if (isGroundedRepair && improvesQuality) {
-          articleData = repairedArticle;
-          articleQualityReview = repairedReview;
-          addLog(
-            `✅ 第2段階完了: ${initialTextLength}文字 → ${repairedTextLength}文字、` +
-              `品質 ${data?.articleQualityReview?.qualityScore || 0}点 → ${repairedReview.qualityScore}点`,
-            'success'
+          const repairedArticle = repairData.articleData;
+          const repairedReview = buildQualityReviewForGeneratedArticle(
+            repairData,
+            repairedArticle,
+            {},
+            'single_program'
           );
-        } else {
-          const reasons = [
-            !isGroundedRepair ? '根拠不明または矛盾する主張が残った' : '',
-            !improvesQuality ? 'ルール品質スコアが初稿を上回らなかった' : '',
-          ].filter(Boolean);
-          addLog(`⚠️ 第2段階の補強案は不採用です。${reasons.join(' / ')}`, 'warning');
+          const repairedTextLength = stripHtmlToText(repairedArticle.content || '').length;
+          const isGroundedRepair =
+            (repairedReview.unsupportedClaims || []).length === 0 &&
+            (repairedReview.contradictoryClaims || []).length === 0;
+          const improvesQuality = repairedReview.qualityScore > articleQualityReview.qualityScore;
+
+          if (isGroundedRepair && improvesQuality) {
+            articleData = repairedArticle;
+            articleQualityReview = repairedReview;
+            addLog(
+              `✅ 第2段階完了: ${initialTextLength}文字 → ${repairedTextLength}文字、` +
+                `品質 ${data?.articleQualityReview?.qualityScore || 0}点 → ${repairedReview.qualityScore}点`,
+              'success'
+            );
+          } else {
+            const reasons = [
+              !isGroundedRepair ? '根拠不明または矛盾する主張が残った' : '',
+              !improvesQuality ? 'ルール品質スコアが初稿を上回らなかった' : '',
+            ].filter(Boolean);
+            addLog(`⚠️ 第2段階の補強案は不採用です。${reasons.join(' / ')}`, 'warning');
+          }
+        } catch (repairError) {
+          addLog(`⚠️ 本文補強を完了できませんでした。初稿を保存対象として続行します。${repairError.message}`, 'warning');
         }
-      } catch (repairError) {
-        addLog(`⚠️ 本文補強を完了できませんでした。初稿を保存対象として続行します。${repairError.message}`, 'warning');
+      } else {
+        addLog('✅ 第2段階は不要です。初稿がルール品質80点以上を満たしています。', 'success');
       }
 
       if (articleQualityReview.ruleBasedScore >= 80 && hasUsableOfficialSource(articleQualityReview.sourceFacts)) {
@@ -1075,7 +1106,6 @@ export default function AdminColumns({ initialMode = 'columns' }) {
               content: articleData.content || '',
               category: articleData.category || '',
               articleType: 'single_program',
-              sourceText: officialText,
               sourceFacts: articleQualityReview.sourceFacts,
               ruleBasedReview: articleQualityReview,
             },

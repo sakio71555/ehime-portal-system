@@ -1908,6 +1908,7 @@ serve(async (req: Request) => {
     const qualityReviewOnly = body?.qualityReviewOnly === true;
     const repairArticleOnly = body?.repairArticleOnly === true;
     const deferEnhancements = body?.deferEnhancements === true;
+    const deferImage = body?.deferImage === true;
     const useLlmReview = body?.useLlmReview === true;
     const confirmUsePaidApi = body?.confirmUsePaidApi === true;
     const thumbnailText =
@@ -2493,7 +2494,7 @@ ${extraInstructionBlock}
       },
       body: JSON.stringify({
         model: textModel,
-        temperature: 0.7,
+        temperature: suppliedFacts.articleType === "single_program" ? 0.3 : 0.7,
         max_completion_tokens: deferEnhancements ? 7000 : 12000,
         response_format: {
           type: "json_schema",
@@ -2865,7 +2866,7 @@ ${extraInstructionBlock}
     articleData.quality_review = articleQualityReview;
     const articleQualityWarnings = buildArticleQualityWarnings(articleQualityReview);
 
-    const { base64Image, imageError, imageUrl, imageDebug } = deferEnhancements
+    const { base64Image, imageError, imageUrl, imageDebug } = deferEnhancements || deferImage
       ? {
           base64Image: "",
           imageError: "",
