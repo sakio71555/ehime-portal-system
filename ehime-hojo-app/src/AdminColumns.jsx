@@ -13,6 +13,21 @@ const FEATURE_CATEGORY = '特集';
 
 const createImageFileName = (prefix) => `${prefix}_${Date.now()}.png`;
 
+const subsidyFactValue = (value) =>
+  Array.isArray(value) ? value.filter(Boolean).join(' / ') : String(value || '').trim();
+
+const scoreSubsidyForColumn = (subsidy = {}) =>
+  [
+    subsidy.title,
+    subsidy.organization,
+    subsidy.official_url || subsidy.source_url,
+    subsidy.application_period_text || subsidy.deadline,
+    subsidy.amount_text || subsidy.amount,
+    subsidy.subsidy_rate_text || subsidy.subsidy_rate,
+    subsidyFactValue(subsidy.target_entities_arr || subsidy.target_entities),
+    subsidyFactValue(subsidy.target_expenses_arr || subsidy.target_expenses),
+  ].filter((value) => subsidyFactValue(value)).length;
+
 export default function AdminColumns({ initialMode = 'columns' }) {
   const [columns, setColumns] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -756,7 +771,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
     if (
       !window.confirm(
-        '現在の「公開中」の補助金データから、AIが記事化候補を1件選び、公開前確認用の下書きと画像を生成します。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約1分かかります）'
+        '現在の「公開中」の補助金データから、公式情報が比較的揃った記事化候補をAIが1件選び、公開前確認用の下書きと画像を生成します。\n本文生成、必要時の補強、合格圏の記事に対する品質レビューで外部API料金が発生します。追加レビューは最大1回です。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約1〜3分かかります）'
       )
     ) {
       return;
@@ -784,22 +799,25 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
       if (dbError || !rawSubsidies) throw new Error('公開中の補助金データが見つかりません。');
 
-      const subsidies = rawSubsidies.filter((s) => !existingIds.has(s.id)).slice(0, 30);
+      const subsidies = rawSubsidies
+        .filter((s) => !existingIds.has(s.id))
+        .sort((left, right) => scoreSubsidyForColumn(right) - scoreSubsidyForColumn(left))
+        .slice(0, 30);
 
       if (subsidies.length === 0) {
         throw new Error('新しくコラム化できる補助金がありません（すべて記事化済みです）。');
       }
 
-      addLog(`✅ 未記事化の最新データ ${subsidies.length} 件をAIに渡しました。分析中です...`, 'info');
+      addLog(`✅ 未記事化データから公式情報が比較的多い ${subsidies.length} 件をAIに渡しました。分析中です...`, 'info');
 
       const dataText = subsidies
         .map(
           (s) =>
-            `ID:${s.id} | タイトル:${s.title || ''} | 機関:${s.organization || ''} | 地域:${s.region_text || ''} | 対象:${s.target_entities || ''} | 経費:${s.target_expenses || ''} | 上限:${s.amount_text || s.amount || ''} | 締切:${s.deadline || s.application_period_text || ''} | 公式URL:${s.official_url || s.source_url || 'なし'} | 概要:${s.summary || ''}`
+            `ID:${s.id} | タイトル:${s.title || ''} | 機関:${s.organization || ''} | 地域:${s.region_text || ''} | 対象:${subsidyFactValue(s.target_entities_arr || s.target_entities)} | 経費:${subsidyFactValue(s.target_expenses_arr || s.target_expenses)} | 補助率:${s.subsidy_rate_text || s.subsidy_rate || ''} | 上限:${s.amount_text || s.amount || ''} | 締切:${s.application_period_text || s.deadline || ''} | 公式URL:${s.official_url || s.source_url || 'なし'} | 概要:${s.summary || ''}`
         )
         .join('\n---\n');
 
-      addLog('AIが記事化候補を選び、公式確認導線を含む下書きを作成しています（約30秒〜1分）...', 'info');
+      addLog('AIが記事化候補を選び、公式確認導線を含む下書きを作成しています（約1〜3分）...', 'info');
 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
@@ -825,19 +843,29 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         if (articleExpansion.applied) {
           addLog(
             `📝 自動補強: ${before.textLength || 0}文字 → ${after.textLength || 0}文字、` +
-              `H2 ${after.h2Count || 0}個、表 ${after.tableCount || 0}個`,
+              `H2 ${after.h2Count || 0}個、表 ${after.tableCount || 0}個、` +
+              `品質 ${articleExpansion.qualityBefore || 0}点 → ${articleExpansion.qualityAfter || 0}点`,
             'info'
           );
         } else {
           addLog(
             `⚠️ 自動補強を適用できませんでした。` +
-              `${articleExpansion.error ? `理由: ${articleExpansion.error}` : '初稿より品質指標が改善しませんでした。'}`,
+              `${articleExpansion.rejectedReason ? `理由: ${articleExpansion.rejectedReason}` : articleExpansion.error ? `理由: ${articleExpansion.error}` : '初稿より品質指標が改善しませんでした。'}`,
             'warning'
           );
         }
       }
 
       const articleQualityReview = buildQualityReviewForGeneratedArticle(data, articleData, {}, 'column');
+
+      if (articleQualityReview.llmReview?.usedApi) {
+        addLog(
+          `✅ API品質レビュー実行済み: 意味評価 ${articleQualityReview.llmReview.semanticScore || 0}/100`,
+          'success'
+        );
+      } else if (articleQualityReview.ruleBasedScore >= 80) {
+        addLog('⚠️ API品質レビューは未実行です。管理画面から手動実行できます。', 'warning');
+      }
 
       addLog(`✨ 執筆完了！タイトル: 「${articleData.title}」`, 'success');
       addLog(

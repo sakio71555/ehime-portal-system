@@ -75,7 +75,8 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 - 具体的な補助率・上限額・年度をタイトルに入れる場合は、本文にも具体情報、対象制度名、公式確認導線を入れてください。
 - 具体情報を確認できない場合は、タイトルを「確認したい補助金・支援制度」「探し方と申請前の注意点」など安全な表現に弱めてください。
 - 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。
-- H2を10個以上入れてください。
+- H2は10〜12個を目安にし、見出しだけを細かく量産しないでください。
+- 各H2には原則2段落以上の具体的な説明を入れ、1段落だけの薄い節を並べないでください。
 - 表を最低2つ以上入れてください。
 - チェックリストを入れてください。
 - CTAを入れてください。
@@ -88,9 +89,12 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 - 「必ず対象」「必ずもらえる」「必ず使える」など断定しないでください。
 - 管理用メモ、品質スコア、自己採点、fatalIssues、warnings、shouldRegenerate などを公開本文に入れないでください。
 - suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを推測で補完しないでください。
+- suppliedFacts にない企業名、架空事例、モデルケース、導入効果、試算金額を作らないでください。「株式会社A」などの仮名事例も禁止です。
 - 情報が不足する場合は missingFacts として管理用データに返し、本文では断定しないでください。
 - 正式な単一制度を特定できない場合は「この補助金」「上限額が設定されています」「一定の補助率が適用されます」など単一制度前提の表現を使わず、業種別・目的別の探し方として構成してください。
 - 産業廃棄物処理業者、リサイクル業者、設備投資、新技術導入、環境対策費、人件費、管理費、着手済み経費などの具体項目は、suppliedFacts に根拠がある場合だけ本文に書いてください。
+- 検索順位を目的に一般論を水増しせず、公式情報と愛媛県内の読者が次に判断するための整理を優先してください。
+- AIを活用した整理であること、公開前に運営者が確認すること、制度内容が変わる可能性を自然な注意書きで示してください。
 
 【本文にできるだけ入れる要素】
 1. 冒頭の結論
@@ -219,6 +223,8 @@ const INDUSTRY_UNSUPPORTED_RE =
 const EXPENSE_UNSUPPORTED_RE = /(新規設備導入費|研修費|調査費|設備投資|新技術導入|環境対策費)/;
 const EXCLUDED_UNSUPPORTED_RE =
   /(中古品|人件費|管理費|着手済み経費).{0,24}(対象外|補助対象外|対象にならない)|(?:対象外|補助対象外).{0,24}(中古品|人件費|管理費|着手済み経費)/;
+const FICTIONAL_EXAMPLE_RE =
+  /(?:株式会社|有限会社)[A-ZＡ-Ｚ](?:社)?|架空(?:の|事例|企業)|仮想事例|モデルケース|導入効果.{0,60}(?:円|万円|億円)/;
 const CLAIM_NUMBER_RE =
   /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|申請締切|締切|公募期間|受付期間|令和\s*\d+\s*年度|20\d{2}\s*年).{0,40}?(%|％|円|万円|千円|令和\s*\d+\s*年|20\d{2}[/-]\d{1,2}|20\d{2}年\d{1,2}月|\d{1,3}\s*\/\s*\d{1,3}|\d+\s*割)/g;
 const SINGLE_PROGRAM_LANGUAGE_RE =
@@ -462,6 +468,7 @@ export const buildColumnSourceFacts = (input = {}) => {
       ...existingFacts.eligibleExpenses,
       ...splitFactList(extractLabeledValue(selectedBlock, '経費')),
     ]),
+    subsidyRate: existingFacts.subsidyRate || extractLabeledValue(selectedBlock, '補助率'),
     subsidyCap: existingFacts.subsidyCap || extractLabeledValue(selectedBlock, '上限'),
     applicationDeadline: existingFacts.applicationDeadline || extractLabeledValue(selectedBlock, '締切'),
     officialSources,
@@ -661,6 +668,14 @@ const buildFactualClaims = ({ title = '', text = '', sourceFacts = {} }) => {
 
   if (EXCLUDED_UNSUPPORTED_RE.test(text) && !/(中古品|人件費|管理費|着手済み経費)/.test(factsText)) {
     addClaim('対象外経費の根拠がない', 'unsupported', 'suppliedFacts に本文の対象外経費を裏付ける根拠がありません。');
+  }
+  const fictionalExample = text.match(FICTIONAL_EXAMPLE_RE)?.[0] || '';
+  if (fictionalExample && !factsText.includes(fictionalExample)) {
+    addClaim(
+      `架空・仮名の事例が含まれています: ${fictionalExample}`,
+      'unsupported',
+      'suppliedFacts にない企業名、導入事例、試算金額は公開本文へ追加できません。'
+    );
   }
 
   return uniqueList(claims.map((claim) => JSON.stringify(claim))).map((claim) => JSON.parse(claim));
@@ -1082,6 +1097,12 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
       `H2が${h2Count}個です。検索意図を満たすには10個以上を目安にしてください。`,
       '冒頭の結論、公式ファクト、不足情報、対象者、対象経費、対象外、申請前注意、愛媛県内での探し方、内部リンク、まとめをH2で整理してください。'
     );
+  } else if (h2Count > 12) {
+    addWarning(
+      `H2が${h2Count}個あります。見出しを細分化しすぎず、10〜12個を目安に内容の近い節を統合してください。`,
+      '各H2に2段落以上の具体的な説明を持たせ、薄い節の量産を避けてください。'
+    );
+    addScoreCap(79, 'H2が13個以上あり、見出しが細分化されすぎています。');
   }
 
   if (!hasChecklist) {

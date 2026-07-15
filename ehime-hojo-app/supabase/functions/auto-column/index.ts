@@ -307,6 +307,13 @@ const normalizeGeneratedInternalLinks = (content = "") =>
     .replace(/href=(["'])\/subsidy-list\/?\1/gi, 'href=$1/ehime-subsidy/$1')
     .replace(/href=(["'])https:\/\/ehime-hojokin\.jp\/subsidy-list\/?\1/gi, 'href=$1/ehime-subsidy/$1');
 
+const ensureGeneratedInternalLinks = (content = "") => {
+  const normalized = normalizeGeneratedInternalLinks(content);
+  if (countInternalLinks(normalized) > 0) return normalized;
+
+  return `${normalized}\n<p><strong>関連ページ:</strong> <a href="/ehime-subsidy/">愛媛県の補助金一覧を見る</a>、<a href="/simulator">補助金かんたん診断を使う</a></p>`;
+};
+
 const countH2 = (value: string) => (String(value || "").match(/<h2[\s>]/gi) || []).length;
 
 const countTables = (value: string) => (String(value || "").match(/<table[\s>]/gi) || []).length;
@@ -345,6 +352,8 @@ const industryUnsupportedRe =
 const expenseUnsupportedRe = /(新規設備導入費|研修費|調査費|設備投資|新技術導入|環境対策費)/;
 const excludedUnsupportedRe =
   /(中古品|人件費|管理費|着手済み経費).{0,24}(対象外|補助対象外|対象にならない)|(?:対象外|補助対象外).{0,24}(中古品|人件費|管理費|着手済み経費)/;
+const fictionalExampleRe =
+  /(?:株式会社|有限会社)[A-ZＡ-Ｚ](?:社)?|架空(?:の|事例|企業)|仮想事例|モデルケース|導入効果.{0,60}(?:円|万円|億円)/;
 const claimNumberRe = /(補助率|上限額|補助上限|補助額|給付額|助成額|金額|申請締切|締切|公募期間|受付期間|令和\s*\d+\s*年度|20\d{2}\s*年).{0,40}?(%|％|円|万円|千円|令和\s*\d+\s*年|20\d{2}[/-]\d{1,2}|20\d{2}年\d{1,2}月|\d{1,3}\s*\/\s*\d{1,3}|\d+\s*割)/g;
 const singleProgramLanguageRe =
   /(この補助金|この制度|上限額が設定されています|一定の補助率が適用されます|令和\s*\d+\s*年度においても実施されています|20\d{2}\s*年においても実施されています)/;
@@ -549,6 +558,7 @@ const buildSourceFacts = ({
     administeringBody: existing.administeringBody || extractLabeledValue(selectedBlock, "機関") || extractLabeledValue(officialText, "実施機関"),
     eligibleApplicants: Array.from(new Set([...existing.eligibleApplicants, ...splitFactList(extractLabeledValue(selectedBlock, "対象"))])),
     eligibleExpenses: Array.from(new Set([...existing.eligibleExpenses, ...splitFactList(extractLabeledValue(selectedBlock, "経費"))])),
+    subsidyRate: existing.subsidyRate || extractLabeledValue(selectedBlock, "補助率"),
     subsidyCap: existing.subsidyCap || extractLabeledValue(selectedBlock, "上限"),
     applicationDeadline: existing.applicationDeadline || extractLabeledValue(selectedBlock, "締切"),
     officialSources,
@@ -665,6 +675,14 @@ const buildFactualClaims = (title: string, text: string, sourceFacts: SourceFact
   }
   if (excludedUnsupportedRe.test(text) && !/(中古品|人件費|管理費|着手済み経費)/.test(factsText)) {
     addClaim("対象外経費の根拠がない", "unsupported", "suppliedFacts に本文の対象外経費を裏付ける根拠がありません。");
+  }
+  const fictionalExample = text.match(fictionalExampleRe)?.[0] || "";
+  if (fictionalExample && !factsText.includes(fictionalExample)) {
+    addClaim(
+      `架空・仮名の事例が含まれています: ${fictionalExample}`,
+      "unsupported",
+      "suppliedFacts にない企業名、導入事例、試算金額は公開本文へ追加できません。"
+    );
   }
 
   return Array.from(new Map(claims.map((claim) => [`${claim.status}:${claim.claim}`, claim])).values());
@@ -912,6 +930,9 @@ const buildMachineQualityReview = (
 
   if (countH2(content) < 10) {
     addWarning("H2が10個未満です。");
+  } else if (countH2(content) > 12) {
+    addWarning("H2が13個以上あります。内容の近い節を統合し、各H2を厚くしてください。");
+    addScoreCap(79, "H2が13個以上あり、見出しが細分化されすぎています。");
   }
 
   if (!hasChecklist(content)) {
@@ -1631,11 +1652,6 @@ const getGeneratedArticleMetrics = (content: string): GeneratedArticleMetrics =>
   tableCount: (String(content || "").match(/<table\b/gi) || []).length,
 });
 
-const articleMetricPenalty = (metrics: GeneratedArticleMetrics, requiredLength: number) =>
-  Math.max(0, requiredLength - metrics.textLength) +
-  Math.max(0, 10 - metrics.h2Count) * 250 +
-  Math.max(0, 2 - metrics.tableCount) * 500;
-
 const expandGeneratedArticle = async ({
   openAiKey,
   textModel,
@@ -1643,6 +1659,7 @@ const expandGeneratedArticle = async ({
   content,
   articleType,
   sourceFacts,
+  qualityReview,
 }: {
   openAiKey: string;
   textModel: string;
@@ -1650,6 +1667,7 @@ const expandGeneratedArticle = async ({
   content: string;
   articleType: string;
   sourceFacts: SourceFacts;
+  qualityReview: ArticleQualityReview;
 }) => {
   const requiredLength = articleType === "feature" ? 6000 : 4000;
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1686,13 +1704,18 @@ const expandGeneratedArticle = async ({
 
 厳守:
 - suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを追加しない。
+- suppliedFacts にない企業名、架空事例、モデルケース、導入効果、試算金額を追加しない。「株式会社A」などの仮名事例も禁止する。
 - 初稿の正しい説明と公式リンクは維持し、不足する見出し・表・比較・チェックリスト・申請準備の説明だけを厚くする。
 - 同じ説明の言い換えや文字数稼ぎをしない。
-- H2を10個以上、表を2つ以上、チェックリスト、CTA、実在する内部リンクを含める。
+- H2は10〜12個に絞り、各H2に原則2段落以上の具体的な説明を入れる。薄い見出しを量産しない。
+- 表を2つ以上、チェックリスト、CTA、実在する内部リンクを含める。
 - 内部リンクは /ehime-subsidy/、/search、/simulator、/experts、/columns、/features、実在する /feature/ 配下だけを使う。
 - /subsidy-list は使わない。
 - 申請前に契約・発注・購入・着手できる時点は、公式ファクトに根拠がなければ公募要領と実施機関への確認を促す。
 - 公開本文へ品質スコア、fatalIssues、warnings、missingFacts、管理用メモを入れない。
+- 公式ファクトが不足する項目は具体値を作らず、「公開資料では確認できないため、公式ページまたは実施機関で確認が必要」と明記する。
+- 検索順位のための一般論を水増しせず、愛媛県内の読者が対象可否、必要書類、申請前の行動を判断できる内容を優先する。
+- AIを活用して情報を整理した下書きであり、公開前に運営者が公式情報を確認すること、制度内容が変わる可能性を末尾で自然に示す。
 - 使用HTMLは <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <caption> のみ。
 - 本文は最低${requiredLength.toLocaleString()}文字を目安にする。
 `.trim(),
@@ -1708,6 +1731,18 @@ ${articleType}
 
 suppliedFacts:
 ${JSON.stringify(sourceFacts, null, 2)}
+
+ルールベース品質レビュー:
+${JSON.stringify({
+  qualityScore: qualityReview.qualityScore,
+  fatalIssues: qualityReview.fatalIssues,
+  warnings: qualityReview.warnings,
+  missingFacts: qualityReview.missingFacts,
+  unsupportedClaims: qualityReview.unsupportedClaims,
+  contradictoryClaims: qualityReview.contradictoryClaims,
+  improvementSuggestions: qualityReview.improvementSuggestions,
+  scoreCapsApplied: qualityReview.scoreCapsApplied,
+}, null, 2)}
 
 現在の初稿:
 ${String(content || "").slice(0, 24000)}
@@ -1730,7 +1765,7 @@ ${String(content || "").slice(0, 24000)}
 
   try {
     const parsed = JSON.parse(rawContent);
-    return { content: normalizeGeneratedInternalLinks(parsed?.content || ""), error: "" };
+    return { content: ensureGeneratedInternalLinks(parsed?.content || ""), error: "" };
   } catch {
     return { content: "", error: "記事の自動補強結果を解析できませんでした。" };
   }
@@ -1954,7 +1989,9 @@ serve(async (req: Request) => {
 - 正しく書けている見出し・公式ファクト・内部リンクは維持し、全面的な言い換えをしない。
 - 文字数、表、見出し、チェックリストなど不足している要素を追加し、根拠不明の箇所だけを削除または安全化する。
 - 通常コラムは4,000文字以上、特集記事は6,000文字以上を目安にし、同じ説明の繰り返しで水増ししない。
+- H2は10〜12個に絞り、各H2に原則2段落以上の具体的な説明を入れる。
 - suppliedFacts にない制度名、年度、補助率、上限額、締切、対象者、対象経費、対象外経費、公式URLを追加しない。
+- suppliedFacts にない企業名、架空事例、モデルケース、導入効果、試算金額を追加しない。「株式会社A」などの仮名事例も禁止する。
 - 根拠がない具体情報は削除、または「確認が必要」という安全表現に弱める。
 - タイトルに補助率・上限額・締切などを入れるのは、suppliedFacts に具体値がある場合だけ。
 - 管理用メモ、品質スコア、fatalIssues、warnings、missingFacts、unsupportedClaims を content に入れない。
@@ -2029,7 +2066,7 @@ ${JSON.stringify({
         seo_title: repairedArticle.seo_title || repairedArticle.title || originalTitle,
         meta_description: repairedArticle.meta_description || "",
         thumbnail_text: repairedArticle.thumbnail_text || "Japanese local business subsidy support",
-        content: normalizeGeneratedInternalLinks(repairedArticle.content || originalBody),
+        content: ensureGeneratedInternalLinks(repairedArticle.content || originalBody),
         category: repairedArticle.category || preferredCategory || "補助金情報",
         tags: Array.isArray(repairedArticle.tags) ? repairedArticle.tags : [],
       };
@@ -2124,7 +2161,7 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 - 読者は愛媛県内の事業者です。
 - 公式ページや入力データの要約・言い換えだけで終わらせず、読者が次に判断できる整理を加えてください。
 - 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。
-- H2を10個以上入れてください。
+- H2は10〜12個を目安にし、各H2に原則2段落以上の具体的な説明を入れてください。薄い見出しを量産しないでください。
 - 表を最低2つ以上入れてください。
 - チェックリスト、CTA、内部リンクを本文に自然に入れてください。
 - 使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
@@ -2135,6 +2172,7 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 - 愛媛県、市町村、商工会議所、商工会、支援機関など愛媛県内の読者向けの視点を入れてください。
 - 文字数稼ぎの一般論、長い前置き、同じ内容の繰り返し、キーワードだけを差し替えた文章は禁止です。
 - 入力データにない日付、受付状況、金額、補助率、採択率、企業名、成功事例、URLを作らないでください。
+- suppliedFacts にない架空事例、モデルケース、導入効果、試算金額を作らないでください。「株式会社A」などの仮名事例も禁止です。
 - suppliedFacts にない制度名、年度、回次、日付、補助率、上限額、対象者、対象経費、対象外経費、実施機関、公式URLを推測で補完しないでください。
 - suppliedFacts にない情報は missingFacts として quality_review に返し、本文では断定しないでください。
 - 正式な単一制度を特定できない場合は「この補助金」「上限額が設定されています」「一定の補助率が適用されます」など単一制度前提の表現を使わず、業種別・目的別の探し方として構成してください。
@@ -2144,6 +2182,8 @@ AIの役割は公開前の下書き作成です。公開前に人間が公式情
 - タイトルで「補助率」「上限額」「令和8年度」「2026年」などを約束する場合は、本文に具体的な根拠・対象制度名・公式確認導線を必ず入れてください。
 - 具体的な補助率・上限額・年度を確認できない場合は、タイトルを「確認したい補助金・支援制度」「探し方と申請前の注意点」など安全な表現にしてください。
 - 実在企業の成功事例を断定しないこと。
+- 検索順位を目的に一般論を水増しせず、公式情報と愛媛県内の読者が次に判断するための整理を優先すること。
+- AIを活用して情報を整理した下書きであること、公開前に運営者が確認すること、制度内容が変更される可能性を末尾の注意書きで自然に示すこと。
 - 「必ず採択される」「必ず受給できる」などの断定表現を避けること。
 - 初心者にもわかりやすい日本語にすること。
 - 本文はHTMLで出力すること。
@@ -2282,9 +2322,10 @@ suppliedFacts にない具体情報は推測せず、quality_review.missingFacts
       ? `
 以下は、現在公開中の補助金データです。
 
-この中から、愛媛県内の事業者にとって記事化する価値が高く、公式URLや申請前の判断材料を本文に入れやすい制度を1つ選び、公開前確認用のコラム下書きを作成してください。
+この中から、愛媛県内の事業者にとって記事化する価値が高く、公式URL、実施機関、対象者、対象経費、補助率、上限額、申請期間の情報ができるだけ揃っている制度を1つ選び、公開前確認用のコラム下書きを作成してください。
 
 選んだ制度の ID を subsidy_id に必ず入れてください。
+新しさだけで選ばず、公式ファクトの充実度を優先してください。特に補助率または上限額が欠ける制度は、他に情報が揃った候補がある限り選ばないでください。
 公式URLがある制度を優先してください。公式URLがない制度を選ぶ場合は、本文内で公式確認先が未確認であることを明記してください。
 
 【補助金データ】
@@ -2559,7 +2600,7 @@ ${extraInstructionBlock}
     articleData.thumbnail_text =
       articleData.thumbnail_text || "Japanese small business subsidy support";
     articleData.content =
-      normalizeGeneratedInternalLinks(
+      ensureGeneratedInternalLinks(
         articleData.content ||
           "<p>現在、記事本文を準備中です。詳細は公式情報をご確認ください。</p>"
       );
@@ -2594,14 +2635,25 @@ ${extraInstructionBlock}
       : suppliedFacts;
     const requiredArticleLength = articleType === "feature" || articleData.category === "特集" ? 6000 : 4000;
     const initialArticleMetrics = getGeneratedArticleMetrics(articleData.content);
+    const qualityReviewOptions = {
+      sourceFacts: articleSourceFacts,
+      sourceText,
+      subsidiesText,
+      subsidyId: articleData.subsidy_id,
+    };
+    const initialMachineReview = buildMachineQualityReview(articleData, articleType, qualityReviewOptions);
     const shouldExpandArticle =
       initialArticleMetrics.textLength < requiredArticleLength ||
       initialArticleMetrics.h2Count < 10 ||
+      initialArticleMetrics.h2Count > 12 ||
       initialArticleMetrics.tableCount < 2;
     const articleExpansion = {
       attempted: shouldExpandArticle,
       applied: false,
       error: "",
+      rejectedReason: "",
+      qualityBefore: initialMachineReview.qualityScore,
+      qualityAfter: initialMachineReview.qualityScore,
       before: initialArticleMetrics,
       after: initialArticleMetrics,
     };
@@ -2614,31 +2666,70 @@ ${extraInstructionBlock}
         content: articleData.content,
         articleType: articleType === "feature" || articleData.category === "特集" ? "feature" : articleType,
         sourceFacts: articleSourceFacts,
+        qualityReview: initialMachineReview,
       });
 
       articleExpansion.error = expansionResult.error;
       if (expansionResult.content) {
         const expandedMetrics = getGeneratedArticleMetrics(expansionResult.content);
+        const expandedArticleData = { ...articleData, content: expansionResult.content };
+        const expandedReview = buildMachineQualityReview(expandedArticleData, articleType, qualityReviewOptions);
+        const rejectionReasons: string[] = [];
         articleExpansion.after = expandedMetrics;
-        if (
-          articleMetricPenalty(expandedMetrics, requiredArticleLength) <
-          articleMetricPenalty(initialArticleMetrics, requiredArticleLength)
-        ) {
+        articleExpansion.qualityAfter = expandedReview.qualityScore;
+
+        if (expandedMetrics.textLength < requiredArticleLength) {
+          rejectionReasons.push(`本文が${requiredArticleLength.toLocaleString()}文字に届いていません`);
+        }
+        if (expandedMetrics.h2Count < 10 || expandedMetrics.h2Count > 12) {
+          rejectionReasons.push("H2が10〜12個の範囲ではありません");
+        }
+        if (expandedMetrics.tableCount < 2) rejectionReasons.push("表が2つ未満です");
+        if (expandedReview.unsupportedClaims.length > 0) {
+          rejectionReasons.push("根拠不明の主張が残っています");
+        }
+        if (expandedReview.contradictoryClaims.length > 0) {
+          rejectionReasons.push("公式情報と矛盾する可能性が残っています");
+        }
+        if (expandedReview.qualityScore <= initialMachineReview.qualityScore) {
+          rejectionReasons.push("ルールベース品質スコアが改善しませんでした");
+        }
+
+        if (rejectionReasons.length === 0) {
           articleData.content = expansionResult.content;
           articleExpansion.applied = true;
+        } else {
+          articleExpansion.rejectedReason = `${Array.from(new Set(rejectionReasons)).join("、")}。`;
         }
       }
     }
 
-    const articleQualityReview = mergeQualityReviews(
+    let articleQualityReview = mergeQualityReviews(
       normalizeAiQualityReview(articleData.quality_review),
-      buildMachineQualityReview(articleData, articleType, {
-        sourceFacts: articleSourceFacts,
-        sourceText,
-        subsidiesText,
-        subsidyId: articleData.subsidy_id,
-      })
+      buildMachineQualityReview(articleData, articleType, qualityReviewOptions)
     );
+
+    if (
+      isAutoMode &&
+      articleQualityReview.ruleBasedScore >= 80 &&
+      articleQualityReview.fatalIssues.length === 0 &&
+      articleQualityReview.unsupportedClaims.length === 0 &&
+      articleQualityReview.contradictoryClaims.length === 0 &&
+      hasUsableOfficialSource(articleQualityReview.sourceFacts)
+    ) {
+      try {
+        const llmPayload = await runLlmQualityReview({
+          openAiKey,
+          articleData,
+          articleType,
+          sourceFacts: articleQualityReview.sourceFacts,
+          ruleBasedReview: articleQualityReview,
+        });
+        articleQualityReview = mergeRuleAndLlmReview(articleQualityReview, llmPayload);
+      } catch (reviewError) {
+        console.warn("自動LLM品質レビューを実行できませんでした:", reviewError);
+      }
+    }
     articleData.quality_review = articleQualityReview;
     const articleQualityWarnings = buildArticleQualityWarnings(articleQualityReview);
 

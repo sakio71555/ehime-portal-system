@@ -56,7 +56,6 @@ const officialSourceFacts = {
 
 const headings = [
   '冒頭の結論',
-  'この記事でわかること',
   '公式ファクトで確認できていること',
   'まだ確認が必要なこと',
   '対象になる事業者',
@@ -66,8 +65,6 @@ const headings = [
   '申請準備の流れ',
   'よくある失敗と回避策',
   '愛媛県内での探し方',
-  '内部リンクと次の行動',
-  'まとめ',
 ];
 
 const paragraph =
@@ -151,7 +148,7 @@ const semanticReview = mergeColumnQualityReview(
 );
 const selectedFacts = buildColumnSourceFacts({
   subsidiesText: [
-    'ID:12 | タイトル:制度12 | 機関:愛媛県 | 対象:県内事業者 | 経費:設備費 | 上限:100万円 | 締切:2026年8月1日 | 公式URL:https://example.ehime.jp/12 | 概要:制度12の概要',
+    'ID:12 | タイトル:制度12 | 機関:愛媛県 | 対象:県内事業者 | 経費:設備費 | 補助率:2分の1以内 | 上限:100万円 | 締切:2026年8月1日 | 公式URL:https://example.ehime.jp/12 | 概要:制度12の概要',
     'ID:123 | タイトル:制度123 | 機関:松山市 | 対象:市内事業者 | 経費:広報費 | 上限:200万円 | 締切:2026年9月1日 | 公式URL:https://example.ehime.jp/123 | 概要:制度123の概要',
   ].join('\n---\n'),
   subsidyId: '12',
@@ -173,6 +170,15 @@ const equivalentMoneyArticle = {
 const equivalentMoneyReview = reviewColumnQuality(equivalentMoneyArticle, {
   articleType: 'single_program',
   sourceFacts: equivalentMoneyFacts,
+  humanReviewed: true,
+});
+const fictionalExampleArticle = {
+  ...goodArticle,
+  content: `${goodArticle.content}<p>株式会社Aの導入効果は40,000,000円でした。</p>`,
+};
+const fictionalExampleReview = reviewColumnQuality(fictionalExampleArticle, {
+  articleType: 'single_program',
+  sourceFacts: officialSourceFacts,
   humanReviewed: true,
 });
 
@@ -205,7 +211,7 @@ assertCondition(
   semanticReview
 );
 assertCondition(
-  selectedFacts.officialName === '制度12' && selectedFacts.subsidyCap === '100万円',
+  selectedFacts.officialName === '制度12' && selectedFacts.subsidyRate === '2分の1以内' && selectedFacts.subsidyCap === '100万円',
   '補助金IDは部分一致ではなく、選択したIDのデータブロックだけを使うべきです。',
   selectedFacts
 );
@@ -213,6 +219,11 @@ assertCondition(
   equivalentMoneyReview.unsupportedClaims.length === 0 && equivalentMoneyReview.contradictoryClaims.length === 0,
   '6,000万円と60,000,000円は同額として扱うべきです。',
   equivalentMoneyReview
+);
+assertCondition(
+  fictionalExampleReview.unsupportedClaims.some((claim) => claim.includes('架空・仮名の事例')),
+  'suppliedFacts にない株式会社Aなどの架空・仮名事例を検出すべきです。',
+  fictionalExampleReview
 );
 
 console.log(JSON.stringify({
@@ -249,5 +260,9 @@ console.log(JSON.stringify({
   equivalentMoney: {
     unsupportedClaims: equivalentMoneyReview.unsupportedClaims.length,
     contradictoryClaims: equivalentMoneyReview.contradictoryClaims.length,
+  },
+  fictionalExample: {
+    finalScore: fictionalExampleReview.finalScore,
+    unsupportedClaims: fictionalExampleReview.unsupportedClaims,
   },
 }, null, 2));
