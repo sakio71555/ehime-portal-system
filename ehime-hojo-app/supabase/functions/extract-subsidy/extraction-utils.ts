@@ -84,7 +84,7 @@ export const collectTitleCandidates = (lines: string[], editFormTitle: string) =
     if (
       line.length >= 6 &&
       line.length <= 90 &&
-      /(補助金|助成金|補助事業|助成事業|支援事業|給付金|手当|応援)/.test(line) &&
+      /(補助金|助成金|奨励金|補助事業|助成事業|支援事業|給付金|支援金|手当|応援)/.test(line) &&
       !/(一覧|検索|サイトマップ|問い合わせ|お問い合わせ|ホームページ|更新|更新日)/.test(line)
     ) {
       candidates.push(line);

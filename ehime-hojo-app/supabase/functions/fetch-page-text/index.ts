@@ -98,6 +98,143 @@ const isOfficialDomain = (url: string) => {
   return !EXTERNAL_PORTALS.some((domain) => url.includes(domain));
 };
 
+const RELATED_DOCUMENT_WORDS =
+  /(公募要領|募集要領|交付要綱|実施要領|実施要綱|申請の手引|制度概要|交付規程|募集案内|公募案内|申請書|記入例|算定方法)/i;
+
+const RELATED_SUPPORT_WORDS =
+  /(補助|助成|奨励|給付|支給|交付|申請|公募|募集|対象|要件|算定|立地|操業)/i;
+
+const decodeHtmlEntities = (value: string) =>
+  String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ");
+
+const stripHtmlTags = (value: string) =>
+  decodeHtmlEntities(String(value || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+
+const normalizedHostname = (value: string) => value.toLowerCase().replace(/^www\./, "");
+
+const discoverRelatedDocumentUrls = async (sourceUrl: string) => {
+  try {
+    const source = new URL(sourceUrl);
+    const response = await fetch(sourceUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; EhimeHojokinPortal/1.0; +https://ehime-hojokin.jp)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("text/html")) return [];
+
+    const html = (await response.text()).slice(0, 2_000_000);
+    const candidates: Array<{ url: string; score: number }> = [];
+    const anchorPattern = /<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = anchorPattern.exec(html)) !== null) {
+      const rawHref = decodeHtmlEntities(match[2] || "").trim();
+      if (!rawHref || /^(mailto:|tel:|javascript:|#)/i.test(rawHref)) continue;
+
+      let target: URL;
+      try {
+        target = new URL(rawHref, sourceUrl);
+      } catch {
+        continue;
+      }
+      if (!/^https?:$/.test(target.protocol)) continue;
+      if (normalizedHostname(target.hostname) !== normalizedHostname(source.hostname)) continue;
+      target.hash = "";
+      if (target.toString() === source.toString()) continue;
+
+      const label = stripHtmlTags(match[3] || "");
+      const searchable = `${label} ${target.pathname} ${target.search}`;
+      if (/\.(?:jpe?g|png|gif|webp|svg|zip)(?:$|\?)/i.test(target.toString())) continue;
+
+      let score = 3;
+      if (/\.pdf(?:$|\?)/i.test(target.toString())) score += 6;
+      if (RELATED_DOCUMENT_WORDS.test(searchable)) score += 8;
+      if (RELATED_SUPPORT_WORDS.test(searchable)) score += 3;
+      if (/uploaded\/attachment|upload|download|file/i.test(target.pathname)) score += 2;
+
+      if (score >= 8) candidates.push({ url: target.toString(), score });
+    }
+
+    const seen = new Set<string>();
+    return candidates
+      .sort((left, right) => right.score - left.score)
+      .filter((candidate) => {
+        if (seen.has(candidate.url)) return false;
+        seen.add(candidate.url);
+        return true;
+      })
+      .slice(0, 3)
+      .map((candidate) => candidate.url);
+  } catch {
+    return [];
+  }
+};
+
+const searchRelatedOfficialUrls = async (
+  tavilyKey: string,
+  sourceUrl: string,
+  title: string,
+  organization: string,
+) => {
+  try {
+    const source = new URL(sourceUrl);
+    const query =
+      `"${title}" "${organization}" ` +
+      `(公募要領 OR 募集要領 OR 交付要綱 OR 実施要領 OR 申請の手引 OR 算定方法)`;
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: tavilyKey,
+        query,
+        search_depth: "advanced",
+        include_raw_content: false,
+        include_domains: [source.hostname],
+        max_results: 6,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) return [];
+
+    const candidates = (data?.results || [])
+      .map((result: { url?: string; title?: string; content?: string }) => {
+        if (!result?.url) return null;
+        try {
+          const target = new URL(result.url);
+          target.hash = "";
+          if (normalizedHostname(target.hostname) !== normalizedHostname(source.hostname)) return null;
+          if (target.toString() === source.toString()) return null;
+          const searchable = `${result.title || ""} ${result.content || ""} ${target.pathname}`;
+          let score = 3;
+          if (/\.pdf(?:$|\?)/i.test(target.toString())) score += 6;
+          if (RELATED_DOCUMENT_WORDS.test(searchable)) score += 8;
+          if (RELATED_SUPPORT_WORDS.test(searchable)) score += 3;
+          if (title && normalizeText(searchable).includes(normalizeText(title))) score += 5;
+          return score >= 8 ? { url: target.toString(), score } : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as Array<{ url: string; score: number }>;
+
+    return candidates
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3)
+      .map((candidate) => candidate.url);
+  } catch {
+    return [];
+  }
+};
+
 const normalizeText = (value: string) => {
   return String(value || "")
     .normalize("NFKC")
@@ -278,8 +415,10 @@ const cleanAndFocusText = (rawText: string, title: string) => {
 const extractWithTavily = async (
   tavilyKey: string,
   url: string,
-  title: string
+  title: string,
+  relatedUrls: string[] = []
 ) => {
+  const urls = Array.from(new Set([url, ...relatedUrls])).slice(0, 4);
   const res = await fetch("https://api.tavily.com/extract", {
     method: "POST",
     headers: {
@@ -287,7 +426,7 @@ const extractWithTavily = async (
     },
     body: JSON.stringify({
       api_key: tavilyKey,
-      urls: [url],
+      urls,
       extract_depth: "advanced",
       include_images: false,
     }),
@@ -301,21 +440,52 @@ const extractWithTavily = async (
     );
   }
 
-  const result = data?.results?.[0];
+  const documents = (data?.results || [])
+    .map((result: { raw_content?: string; content?: string; url?: string }) => {
+      const rawSourceText = result?.raw_content || result?.content || "";
+      if (!rawSourceText) return null;
+      return {
+        url: result?.url || url,
+        rawSourceText,
+        cleanedText: cleanAndFocusText(rawSourceText, title),
+      };
+    })
+    .filter(Boolean) as Array<{ url: string; rawSourceText: string; cleanedText: string }>;
 
-  const rawSourceText = result?.raw_content || result?.content || "";
-
-  if (!rawSourceText) {
+  if (!documents.length) {
     throw new Error("指定されたURLのテキストを抽出できませんでした。");
   }
 
-  const cleanedText = cleanAndFocusText(rawSourceText, title);
+  const sourceHostname = normalizedHostname(new URL(url).hostname);
+  const primaryDocument =
+    documents.find((document) => {
+      try {
+        const documentUrl = new URL(document.url);
+        return normalizedHostname(documentUrl.hostname) === sourceHostname &&
+          documentUrl.pathname === new URL(url).pathname;
+      } catch {
+        return false;
+      }
+    }) || documents[0];
+  const supportingDocuments = documents.filter((document) => document !== primaryDocument);
+  const orderedDocuments = supportingDocuments.length
+    ? [...supportingDocuments, primaryDocument]
+    : [primaryDocument];
+  const sourceText = supportingDocuments.length
+    ? orderedDocuments
+      .map((document, index) => {
+        const maxLength = document === primaryDocument ? 5000 : 8000;
+        return `【公式資料 ${index + 1}】\n資料URL: ${document.url}\n${document.cleanedText.slice(0, maxLength)}`;
+      })
+      .join("\n\n")
+      .slice(0, 24000)
+    : primaryDocument.cleanedText;
 
   return {
-    sourceText: cleanedText,
-    resolvedUrl: result?.url || url,
-    rawLength: rawSourceText.length,
-    cleanedLength: cleanedText.length,
+    sourceText,
+    resolvedUrl: primaryDocument.url || url,
+    rawLength: documents.reduce((sum, document) => sum + document.rawSourceText.length, 0),
+    cleanedLength: sourceText.length,
   };
 };
 
@@ -417,6 +587,8 @@ serve(async (req: Request) => {
     const organization =
       typeof body?.organization === "string" ? body.organization.trim() : "";
 
+    const enrichOfficialSources = body?.enrichOfficialSources === true;
+
     if (rawText) {
       if (isHttpUrl(rawText)) {
         return jsonResponse(
@@ -436,12 +608,26 @@ serve(async (req: Request) => {
     }
 
     if (isHttpUrl(sourceUrl)) {
-      const result = await extractWithTavily(tavilyKey, sourceUrl, title);
+      const linkedUrls = enrichOfficialSources
+        ? await discoverRelatedDocumentUrls(sourceUrl)
+        : [];
+      const searchedUrls = enrichOfficialSources && linkedUrls.length < 3
+        ? await searchRelatedOfficialUrls(tavilyKey, sourceUrl, title, organization)
+        : [];
+      const relatedUrls = Array.from(new Set([...linkedUrls, ...searchedUrls])).slice(0, 3);
+      const result = await extractWithTavily(tavilyKey, sourceUrl, title, relatedUrls);
       return jsonResponse(result);
     }
 
     if (isHttpUrl(fallbackUrl)) {
-      const result = await extractWithTavily(tavilyKey, fallbackUrl, title);
+      const linkedUrls = enrichOfficialSources
+        ? await discoverRelatedDocumentUrls(fallbackUrl)
+        : [];
+      const searchedUrls = enrichOfficialSources && linkedUrls.length < 3
+        ? await searchRelatedOfficialUrls(tavilyKey, fallbackUrl, title, organization)
+        : [];
+      const relatedUrls = Array.from(new Set([...linkedUrls, ...searchedUrls])).slice(0, 3);
+      const result = await extractWithTavily(tavilyKey, fallbackUrl, title, relatedUrls);
       return jsonResponse(result);
     }
 

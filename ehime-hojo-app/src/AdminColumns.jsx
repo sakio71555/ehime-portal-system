@@ -850,7 +850,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
     if (
       !window.confirm(
-        '公開中の未記事化データから公式ページを取得し、制度情報を構造化します。ファクト充足率80点以上の候補だけ、初稿、本文補強、品質レビュー、画像生成へ進みます。\n候補確認と各生成段階で外部API料金が発生します。80点未満の記事は画像生成・DB保存しません。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約4〜10分かかります）'
+        '公開中の未記事化データから、公式ページ、関連PDF、公募要領・交付要綱を先に収集し、制度情報を構造化します。ファクト充足率80点以上の候補だけ、初稿、本文補強、品質レビュー、画像生成へ進みます。\n資料収集と各生成段階で外部API料金が発生します。80点未満の記事は画像生成・DB保存しません。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約4〜10分かかります）'
       )
     ) {
       return;
@@ -904,6 +904,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
               fallbackUrl: subsidy.source_url || '',
               title: subsidy.title || '',
               organization: subsidy.organization || '愛媛県',
+              enrichOfficialSources: true,
             },
           });
           if (sourceError) throw new Error(sourceError.message);
@@ -912,6 +913,11 @@ export default function AdminColumns({ initialMode = 'columns' }) {
           const officialText = String(sourceData?.sourceText || '').trim();
           const resolvedUrl = String(sourceData?.resolvedUrl || sourceUrl).trim();
           if (officialText.length < 300) throw new Error('公式本文が300文字未満です。');
+          const officialDocumentCount = Math.max(
+            1,
+            (officialText.match(/【公式資料\s+\d+】/g) || []).length
+          );
+          addLog(`公式ページと関連資料 ${officialDocumentCount} 件を取得しました。`, 'info');
 
           const { data: extractedData, error: extractError } = await supabase.functions.invoke('extract-subsidy', {
             body: {
