@@ -10,7 +10,7 @@ export const COLUMN_QUALITY_SCORE_RUBRIC = `
 - H1/H2が検索意図に合っている
 
 2. 具体性: 15点
-- 対象者、対象経費、対象外になりやすい経費、申請前の注意点が具体的
+- 補助金は対象者・対象事業・対象経費・対象外経費、奨励金・給付金は交付要件・支給条件・算定方法・申請時期が具体的
 - 「詳しくは公式へ」だけで逃げていない
 
 3. 公式確認・安全性: 15点
@@ -54,7 +54,7 @@ export const COLUMN_FATAL_ISSUE_RULES = [
   '本文が1,500文字未満',
   '表が1つもない',
   '内部リンクが1つもない',
-  '対象者・対象経費・注意点が抽象的すぎる',
+  '制度種別に応じた対象者・対象事業・交付条件・算定方法・注意点が抽象的すぎる',
   '愛媛県・市町村・地域事業者の視点がない',
   '管理用メモが公開本文に出ている',
   '公式情報で確認していない数字を確定情報のように書いている',
@@ -84,7 +84,7 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 - 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
 - 公式情報の確認を促してください。
 - 契約・発注・購入・着手が可能になる時点は制度ごとに異なるため、公式情報に基づいて表現してください。公式情報で確認できない場合は「交付決定前などに発生した経費が対象外になる場合があるため、公募要領と実施機関へ確認してください」と安全に書いてください。
-- 対象者、対象経費、対象外になりやすい経費を書いてください。
+- 補助金・助成金では対象者、対象事業、対象経費、対象外になりやすい経費を書いてください。奨励金・給付金では、対象者、交付・支給要件、算定方法、申請時期を書き、公式根拠がない対象経費を作らないでください。
 - 愛媛県内の事業者、個人事業主、市町村、商工会議所、商工会、支援機関の視点を入れてください。
 - 「必ず対象」「必ずもらえる」「必ず使える」など断定しないでください。
 - 管理用メモ、品質スコア、自己採点、fatalIssues、warnings、shouldRegenerate などを公開本文に入れないでください。
@@ -102,8 +102,8 @@ export const COLUMN_GENERATION_PROMPT_RULES = `
 3. 公式ファクトで確認できていること
 4. まだ確認が必要なこと
 5. 対象になる可能性がある人
-6. 対象になりやすい経費
-7. 対象外・注意が必要な経費
+6. 制度種別に応じた対象事業・対象経費、または交付・支給要件
+7. 対象外・注意が必要な条件、または金額の算定方法
 8. 申請前に確認すること
 9. 申請準備の流れ
 10. よくある失敗と回避策
@@ -149,12 +149,12 @@ ${COLUMN_FATAL_ISSUE_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\
 
 export const PUBLISH_QUALITY_CHECKS = [
   'タイトルで約束した答えが本文にある',
-  '対象者、対象経費、対象外、申請前注意が具体的に書かれている',
+  '制度種別に応じた対象者、対象経費または交付・支給要件、算定方法が具体的に書かれている',
   '補助率・上限額・年度などの数字は公式根拠つきで書かれている',
   '公式ページ・自治体窓口・実施機関への確認導線がある',
   '表、チェックリスト、内部リンク、CTAが入っている',
   '愛媛県内の事業者・個人事業主・市町村の文脈が入っている',
-  '申請前に契約・発注・購入・着手しない注意がある',
+  '申請・契約・発注・購入・着手・操業開始の時期を公式情報で確認する注意がある',
   '管理用メモや自己採点が公開本文に混ざっていない',
 ];
 
@@ -168,6 +168,16 @@ export const COLUMN_ARTICLE_TYPES = [
   'research',
   'marketing',
 ];
+
+export const COLUMN_PROGRAM_KINDS = ['subsidy', 'incentive', 'benefit', 'loan', 'other'];
+
+const PROGRAM_KIND_LABELS = {
+  subsidy: '補助金・助成金',
+  incentive: '奨励金',
+  benefit: '給付金・支援金',
+  loan: '融資・利子補給',
+  other: 'その他の支援制度',
+};
 
 const ARTICLE_TYPE_LABELS = {
   single_program: '個別制度記事',
@@ -231,7 +241,7 @@ const SINGLE_PROGRAM_LANGUAGE_RE =
   /(この補助金|この制度|上限額が設定されています|一定の補助率が適用されます|令和\s*\d+\s*年度においても実施されています|20\d{2}\s*年においても実施されています)/;
 
 const SOURCE_FACT_REQUIRED_BY_TYPE = {
-  single_program: ['officialName', 'administeringBody', 'officialSources', 'eligibleApplicants', 'eligibleExpenses'],
+  single_program: ['officialName', 'administeringBody', 'officialSources', 'eligibleApplicants'],
   feature: ['officialSources'],
   feasibility_study: ['officialSources', 'eligibleProjects'],
   equipment: ['officialSources', 'eligibleExpenses'],
@@ -344,6 +354,7 @@ const normalizePreStartRule = (value = {}) => ({
 
 export const createEmptySourceFacts = (articleType = 'feature') => ({
   articleType,
+  programKind: 'other',
   officialName: '',
   fiscalYear: '',
   applicationRound: '',
@@ -357,6 +368,9 @@ export const createEmptySourceFacts = (articleType = 'feature') => ({
   eligibleProjects: [],
   eligibleExpenses: [],
   ineligibleExpenses: [],
+  eligibilityConditions: [],
+  calculationMethod: '',
+  paymentConditions: [],
   applicationMethods: [],
   projectPeriod: '',
   preStartRule: {
@@ -386,12 +400,28 @@ export const normalizeColumnArticleType = (value = '', context = {}) => {
   return 'feature';
 };
 
+export const detectColumnProgramKind = (value = '', context = {}) => {
+  const raw = String(value || '').trim();
+  if (COLUMN_PROGRAM_KINDS.includes(raw)) return raw;
+
+  const text = `${context.title || ''} ${context.content || ''}`;
+  if (/(奨励金|立地奨励|企業立地|雇用奨励|立地促進)/.test(text)) return 'incentive';
+  if (/(給付金|支援金|手当|商品券|給付事業)/.test(text)) return 'benefit';
+  if (/(融資|貸付|利子補給|信用保証料|保証料補助)/.test(text)) return 'loan';
+  if (/(補助金|助成金|補助事業|助成事業)/.test(text)) return 'subsidy';
+  return 'other';
+};
+
 const normalizeSourceFacts = (sourceFacts = {}) => {
   const articleType = normalizeColumnArticleType(sourceFacts.articleType || sourceFacts.article_type || 'feature');
+  const programKind = detectColumnProgramKind(sourceFacts.programKind || sourceFacts.program_kind, {
+    title: sourceFacts.officialName || sourceFacts.official_name,
+  });
   return {
     ...createEmptySourceFacts(articleType),
     ...sourceFacts,
     articleType,
+    programKind,
     officialName: textValue(sourceFacts.officialName || sourceFacts.official_name),
     fiscalYear: textValue(sourceFacts.fiscalYear || sourceFacts.fiscal_year),
     applicationRound: textValue(sourceFacts.applicationRound || sourceFacts.application_round),
@@ -405,6 +435,9 @@ const normalizeSourceFacts = (sourceFacts = {}) => {
     eligibleProjects: uniqueList(sourceFacts.eligibleProjects || sourceFacts.eligible_projects || []),
     eligibleExpenses: uniqueList(sourceFacts.eligibleExpenses || sourceFacts.eligible_expenses || []),
     ineligibleExpenses: uniqueList(sourceFacts.ineligibleExpenses || sourceFacts.ineligible_expenses || []),
+    eligibilityConditions: uniqueList(sourceFacts.eligibilityConditions || sourceFacts.eligibility_conditions || []),
+    calculationMethod: textValue(sourceFacts.calculationMethod || sourceFacts.calculation_method),
+    paymentConditions: uniqueList(sourceFacts.paymentConditions || sourceFacts.payment_conditions || []),
     applicationMethods: uniqueList(sourceFacts.applicationMethods || sourceFacts.application_methods || []),
     projectPeriod: textValue(sourceFacts.projectPeriod || sourceFacts.project_period),
     preStartRule: normalizePreStartRule(sourceFacts.preStartRule || sourceFacts.pre_start_rule || {}),
@@ -412,6 +445,62 @@ const normalizeSourceFacts = (sourceFacts = {}) => {
       ? (sourceFacts.officialSources || sourceFacts.official_sources).map(normalizeSource)
       : [],
     unknownFields: uniqueList(sourceFacts.unknownFields || sourceFacts.unknown_fields || []),
+  };
+};
+
+const hasFundingDetails = (facts = {}) =>
+  Boolean(facts.subsidyRate || facts.subsidyCap || facts.calculationMethod);
+
+const hasEligibilityDetails = (facts = {}) =>
+  (facts.eligibleApplicants || []).length > 0 || (facts.eligibilityConditions || []).length > 0;
+
+const hasPaymentDetails = (facts = {}) =>
+  (facts.paymentConditions || []).length > 0 || hasFundingDetails(facts);
+
+export const getColumnFactReadiness = (sourceFacts = {}, context = {}) => {
+  const facts = normalizeSourceFacts({
+    ...sourceFacts,
+    programKind: sourceFacts.programKind || detectColumnProgramKind('', context),
+  });
+  const checks = [
+    ['officialName', Boolean(facts.officialName)],
+    ['administeringBody', Boolean(facts.administeringBody)],
+    ['officialSources', hasUsableOfficialSource(facts)],
+    ['eligibleApplicants', hasEligibilityDetails(facts)],
+    ['applicationDeadline', Boolean(facts.applicationDeadline)],
+  ];
+
+  if (facts.programKind === 'subsidy') {
+    checks.push(['eligibleExpenses', facts.eligibleExpenses.length > 0], ['fundingDetails', hasFundingDetails(facts)]);
+  } else if (facts.programKind === 'incentive') {
+    checks.push(
+      ['eligibilityConditions', facts.eligibilityConditions.length > 0],
+      ['calculationMethod', Boolean(facts.calculationMethod || facts.subsidyCap)]
+    );
+  } else if (facts.programKind === 'benefit') {
+    checks.push(['paymentConditions', hasPaymentDetails(facts)], ['eligibilityConditions', hasEligibilityDetails(facts)]);
+  } else if (facts.programKind === 'loan') {
+    checks.push(['fundingDetails', hasFundingDetails(facts)], ['eligibilityConditions', hasEligibilityDetails(facts)]);
+  } else {
+    checks.push(
+      ['programDetails', facts.eligibleProjects.length > 0 || facts.eligibilityConditions.length > 0 || facts.eligibleExpenses.length > 0],
+      ['fundingDetails', hasFundingDetails(facts)]
+    );
+  }
+
+  const passed = checks.filter(([, complete]) => complete).length;
+  const score = Math.round((passed / checks.length) * 100);
+  const missingFacts = checks.filter(([, complete]) => !complete).map(([field]) => field);
+  const identityReady = checks.slice(0, 3).every(([, complete]) => complete);
+  const timingReady = Boolean(facts.applicationDeadline);
+
+  return {
+    ready: identityReady && timingReady && missingFacts.length === 0 && score >= 80,
+    score,
+    programKind: facts.programKind,
+    programKindLabel: PROGRAM_KIND_LABELS[facts.programKind] || PROGRAM_KIND_LABELS.other,
+    missingFacts,
+    sourceFacts: facts,
   };
 };
 
@@ -483,6 +572,10 @@ export const buildColumnSourceFacts = (input = {}) => {
     category: input.category,
   });
   nextFacts.articleType = detectedArticleType;
+  nextFacts.programKind = detectColumnProgramKind(
+    existingFacts.programKind === 'other' ? '' : existingFacts.programKind,
+    { title, content: `${contentText} ${sourceText}` }
+  );
   nextFacts.preStartRule =
     nextFacts.preStartRule.confirmed || nextFacts.preStartRule.safeDescription
       ? nextFacts.preStartRule
@@ -518,6 +611,9 @@ const sourceFactEvidenceText = (facts = {}) =>
       ...(facts.eligibleProjects || []),
       ...(facts.eligibleExpenses || []),
       ...(facts.ineligibleExpenses || []),
+      ...(facts.eligibilityConditions || []),
+      facts.calculationMethod,
+      ...(facts.paymentConditions || []),
       ...(facts.applicationMethods || []),
       facts.projectPeriod,
       facts.preStartRule?.safeDescription,
@@ -533,8 +629,16 @@ const hasUsableOfficialSource = (facts = {}) =>
 const getMissingSourceFactFields = (facts = {}, title = '') => {
   const articleType = normalizeColumnArticleType(facts.articleType, { title });
   const required = [...(SOURCE_FACT_REQUIRED_BY_TYPE[articleType] || SOURCE_FACT_REQUIRED_BY_TYPE.feature)];
-  if (articleType === 'single_program' || AMOUNT_PROMISE_RE.test(title)) {
-    required.push('officialName', 'administeringBody', 'officialSources', 'subsidyRate', 'subsidyCap');
+  const programKind = detectColumnProgramKind(facts.programKind, { title });
+  if (articleType === 'single_program') {
+    if (programKind === 'subsidy') required.push('eligibleExpenses', 'fundingDetails');
+    if (programKind === 'incentive') required.push('eligibilityConditions', 'calculationMethod');
+    if (programKind === 'benefit') required.push('eligibilityConditions', 'paymentConditions');
+    if (programKind === 'loan') required.push('eligibilityConditions', 'fundingDetails');
+    if (programKind === 'other') required.push('programDetails', 'fundingDetails');
+  }
+  if (AMOUNT_PROMISE_RE.test(title)) {
+    required.push('officialName', 'administeringBody', 'officialSources', 'fundingDetails');
   }
   if (articleType === 'single_program' || YEAR_PROMISE_RE.test(title) || DEADLINE_PROMISE_RE.test(title)) {
     required.push('applicationDeadline');
@@ -543,6 +647,17 @@ const getMissingSourceFactFields = (facts = {}, title = '') => {
   return uniqueList(
     required.filter((field) => {
       if (field === 'officialSources') return !hasUsableOfficialSource(facts);
+      if (field === 'fundingDetails') return !hasFundingDetails(facts);
+      if (field === 'eligibilityConditions') return !hasEligibilityDetails(facts);
+      if (field === 'paymentConditions') return !hasPaymentDetails(facts);
+      if (field === 'calculationMethod') return !textValue(facts.calculationMethod || facts.subsidyCap);
+      if (field === 'programDetails') {
+        return !(
+          facts.eligibleProjects?.length ||
+          facts.eligibilityConditions?.length ||
+          facts.eligibleExpenses?.length
+        );
+      }
       const value = facts[field];
       if (Array.isArray(value)) return value.length === 0;
       return !textValue(value);
@@ -558,6 +673,11 @@ const formatMissingFact = (field) => {
     eligibleApplicants: '対象者',
     eligibleProjects: '対象事業',
     eligibleExpenses: '対象経費',
+    eligibilityConditions: '交付・支給要件',
+    calculationMethod: '算定方法',
+    paymentConditions: '支給条件',
+    fundingDetails: '補助率・上限額・算定方法のいずれか',
+    programDetails: '対象事業・交付要件・対象経費のいずれか',
     subsidyRate: '補助率',
     subsidyCap: '上限額',
     applicationDeadline: '申請期間・締切',
@@ -641,7 +761,14 @@ const buildFactualClaims = ({ title = '', text = '', sourceFacts = {} }) => {
     );
   }
 
-  if (AMOUNT_PROMISE_RE.test(title) && (!sourceFacts.subsidyRate || !sourceFacts.subsidyCap)) {
+  const titlePromisesRate = /補助率/.test(title);
+  const titlePromisesNumericCap = /(上限額|補助上限|補助額|給付額|助成額|上限)/.test(title);
+  const titlePromisesGenericAmount = /金額/.test(title);
+  const missingPromisedFunding =
+    (titlePromisesRate && !sourceFacts.subsidyRate) ||
+    (titlePromisesNumericCap && !sourceFacts.subsidyCap) ||
+    (titlePromisesGenericAmount && !sourceFacts.subsidyCap && !sourceFacts.calculationMethod);
+  if (AMOUNT_PROMISE_RE.test(title) && missingPromisedFunding) {
     addClaim(
       'タイトルで補助率・上限額を約束しているが、公式ファクトに具体値がありません。',
       'unsupported',
@@ -699,9 +826,12 @@ const suggestSafeTitles = ({ title = '', sourceFacts = {} }) => {
   const base = theme || sourceFacts.officialName || '愛媛県の補助金';
 
   if (articleType === 'single_program' && sourceFacts.officialName) {
+    const detailTitle = detectColumnProgramKind(sourceFacts.programKind, { title }) === 'subsidy'
+      ? `${sourceFacts.officialName}の対象者・対象経費と申請前の注意点`
+      : `${sourceFacts.officialName}の対象者・交付条件と申請前の注意点`;
     return uniqueList([
       `${sourceFacts.officialName}の確認ポイント`,
-      `${sourceFacts.officialName}の対象者・対象経費と申請前の注意点`,
+      detailTitle,
     ]);
   }
 
@@ -861,6 +991,12 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     }
   );
   sourceFacts.articleType = articleType;
+  const programKind = detectColumnProgramKind(sourceFacts.programKind, { title, content: text });
+  sourceFacts.programKind = programKind;
+  const requiresExpenseDetails = programKind === 'subsidy';
+  const hasProgramSpecificDetails = requiresExpenseDetails
+    ? TARGET_RE.test(text) && EXPENSE_RE.test(text) && EXCLUDED_EXPENSE_RE.test(text) && PROJECT_RE.test(text)
+    : TARGET_RE.test(text) && /(対象要件|交付要件|支給要件|立地要件|算定方法|交付条件|支給条件|申請条件)/.test(text);
   const isFeature = articleType === 'feature' || column.category === '特集';
   const fatalIssues = [];
   const warnings = [];
@@ -909,7 +1045,9 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   if (textLength < MIN_FATAL_ARTICLE_TEXT_LENGTH) {
     addFatal(
       `本文が${textLength}文字です。致命的NGの目安である${MIN_FATAL_ARTICLE_TEXT_LENGTH}文字を下回っています。`,
-      '対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。'
+      requiresExpenseDetails
+        ? '対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。'
+        : `対象者、${PROGRAM_KIND_LABELS[programKind]}の交付・支給要件、算定方法、申請時期、愛媛県内での確認先を追加してください。`
     );
     addScoreCap(49, '本文が1,500文字未満です。');
   } else if (textLength < MIN_RECOMMENDED_ARTICLE_TEXT_LENGTH) {
@@ -947,11 +1085,18 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   }
 
   if (AMOUNT_PROMISE_RE.test(title)) {
+    const titlePromisesRate = /補助率/.test(title);
+    const titlePromisesNumericCap = /(上限額|補助上限|補助額|給付額|助成額|上限)/.test(title);
+    const titlePromisesGenericAmount = /金額/.test(title);
+    const fundingAnswerInBody =
+      ((titlePromisesRate || titlePromisesNumericCap) && MONEY_OR_RATE_RE.test(text)) ||
+      (titlePromisesGenericAmount && (MONEY_OR_RATE_RE.test(text) || /算定方法|算定基準|計算方法/.test(text)));
     const hasAmountEvidence =
-      sourceFacts.subsidyRate &&
-      sourceFacts.subsidyCap &&
+      (!titlePromisesRate || sourceFacts.subsidyRate) &&
+      (!titlePromisesNumericCap || sourceFacts.subsidyCap) &&
+      (!titlePromisesGenericAmount || sourceFacts.subsidyCap || sourceFacts.calculationMethod) &&
       AMOUNT_PROMISE_RE.test(text) &&
-      MONEY_OR_RATE_RE.test(text) &&
+      fundingAnswerInBody &&
       hasOfficialEvidence;
     if (!hasAmountEvidence) {
       addFatal(
@@ -1066,16 +1211,24 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     strengths.push('内部リンクがあります。');
   }
 
-  if (!TARGET_RE.test(text) || !EXPENSE_RE.test(text) || !EXCLUDED_EXPENSE_RE.test(text)) {
+  if (!hasProgramSpecificDetails) {
     addFatal(
-      '対象者・対象経費・対象外になりやすい経費のいずれかが不足しています。',
-      '「対象になる可能性がある人」「対象になりやすい経費」「対象外・注意が必要な経費」を具体化してください。'
+      requiresExpenseDetails
+        ? '対象者・対象経費・対象外になりやすい経費のいずれかが不足しています。'
+        : `${PROGRAM_KIND_LABELS[programKind]}として、対象者・交付要件・算定方法または支給条件の説明が不足しています。`,
+      requiresExpenseDetails
+        ? '「対象になる可能性がある人」「対象になりやすい経費」「対象外・注意が必要な経費」を具体化してください。'
+        : '公式ファクトに基づき、対象者、交付・支給要件、金額の算定方法、申請時期を具体化してください。'
     );
   } else {
-    strengths.push('対象者・対象経費・対象外の観点があります。');
+    strengths.push(
+      requiresExpenseDetails
+        ? '対象者・対象経費・対象外の観点があります。'
+        : `${PROGRAM_KIND_LABELS[programKind]}に必要な対象者・交付条件・算定方法の観点があります。`
+    );
   }
 
-  if (!PRE_CONTRACT_RE.test(text) && !START_TIMING_RE.test(text)) {
+  if (requiresExpenseDetails && !PRE_CONTRACT_RE.test(text) && !START_TIMING_RE.test(text)) {
     addFatal(
       '契約・発注・購入・着手が可能になる時点について、制度ごとの確認を促す注意がありません。',
       '公式情報で確認できない場合は、交付決定前などに発生した経費が対象外になる場合があるため、公募要領と実施機関への確認が必要と安全に書いてください。'
@@ -1095,7 +1248,9 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
   if (h2Count < 10) {
     addWarning(
       `H2が${h2Count}個です。検索意図を満たすには10個以上を目安にしてください。`,
-      '冒頭の結論、公式ファクト、不足情報、対象者、対象経費、対象外、申請前注意、愛媛県内での探し方、内部リンク、まとめをH2で整理してください。'
+      requiresExpenseDetails
+        ? '冒頭の結論、公式ファクト、不足情報、対象者、対象経費、対象外、申請前注意、愛媛県内での探し方、内部リンク、まとめをH2で整理してください。'
+        : `冒頭の結論、公式ファクト、不足情報、対象者、${PROGRAM_KIND_LABELS[programKind]}の交付・支給要件、算定方法、申請時期、愛媛県内の確認先、内部リンク、まとめをH2で整理してください。`
     );
   } else if (h2Count > 12) {
     addWarning(
@@ -1188,15 +1343,13 @@ export const reviewColumnQuality = (column = {}, options = {}) => {
     addScoreCap(29, '公式情報と矛盾する可能性がある主張があります。');
   }
 
-  const hasConcreteAudienceExpenseExclusions =
-    TARGET_RE.test(text) && EXPENSE_RE.test(text) && EXCLUDED_EXPENSE_RE.test(text) && PROJECT_RE.test(text);
   const factualGroundingScore = calculateFactualGroundingScore(factualClaims, hasOfficialEvidence);
   const highScoreRequirementsMet =
     textLength >= MIN_RECOMMENDED_ARTICLE_TEXT_LENGTH &&
     sourceCoverageScore === 100 &&
     factualGroundingScore === 100 &&
-    hasConcreteAudienceExpenseExclusions &&
-    (PRE_CONTRACT_RE.test(text) || START_TIMING_RE.test(text)) &&
+    hasProgramSpecificDetails &&
+    (!requiresExpenseDetails || PRE_CONTRACT_RE.test(text) || START_TIMING_RE.test(text)) &&
     hasOfficialRoute &&
     hasOfficialEvidence &&
     EHIME_CONTEXT_RE.test(text) &&

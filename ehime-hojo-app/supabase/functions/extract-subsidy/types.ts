@@ -18,6 +18,13 @@ export type ExtractFacts = {
   amount_max_yen?: number;
   subsidy_rate_text?: string;
 
+  program_kind?: "subsidy" | "incentive" | "benefit" | "loan" | "other";
+  eligibility_conditions_arr?: string[];
+  calculation_method_text?: string;
+  payment_conditions_arr?: string[];
+  application_methods_arr?: string[];
+  pre_start_rule_text?: string;
+
   target_expenses_arr?: string[];
   target_entities_arr?: string[];
 

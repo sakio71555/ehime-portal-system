@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabaseClient';
 import {
   buildColumnSourceFacts,
+  getColumnFactReadiness,
   PUBLISH_QUALITY_CHECKS,
   mergeColumnQualityReview,
   reviewColumnQuality,
@@ -26,6 +27,85 @@ const scoreSubsidyForColumn = (subsidy = {}) =>
     subsidyFactValue(subsidy.target_entities_arr || subsidy.target_entities),
     subsidyFactValue(subsidy.target_expenses_arr || subsidy.target_expenses),
   ].filter((value) => subsidyFactValue(value)).length;
+
+const getCandidateOfficialUrl = (subsidy = {}) =>
+  String(subsidy.official_url || subsidy.source_url || '').trim();
+
+const buildExtractedCandidateFacts = ({ subsidy, extractedFacts, officialText, resolvedUrl }) => {
+  const checkedAt = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const evidenceParts = [
+    extractedFacts.evidence?.application_period_text,
+    extractedFacts.evidence?.amount_text,
+    extractedFacts.evidence?.subsidy_rate_text,
+    extractedFacts.evidence?.target_entities_arr,
+    extractedFacts.evidence?.target_expenses_arr,
+    extractedFacts.evidence?.eligibility_conditions_arr,
+    extractedFacts.evidence?.calculation_method_text,
+    extractedFacts.evidence?.payment_conditions_arr,
+    extractedFacts.evidence?.application_methods_arr,
+    extractedFacts.evidence?.pre_start_rule_text,
+    extractedFacts.summary,
+    officialText,
+  ].filter(Boolean);
+  const officialUrl = resolvedUrl || extractedFacts.official_url || getCandidateOfficialUrl(subsidy);
+
+  return {
+    articleType: 'single_program',
+    programKind: extractedFacts.program_kind || '',
+    officialName: extractedFacts.title || subsidy.title || '',
+    fiscalYear: extractedFacts.fiscal_year || '',
+    applicationRound: '',
+    administeringBody: extractedFacts.organization || subsidy.organization || '',
+    supervisingBody: '',
+    applicationStart: extractedFacts.application_start_date || '',
+    applicationDeadline:
+      extractedFacts.application_period_text || extractedFacts.application_end_date || '',
+    subsidyRate: extractedFacts.subsidy_rate_text || '',
+    subsidyCap: extractedFacts.amount_text || '',
+    eligibleApplicants: Array.isArray(extractedFacts.target_entities_arr)
+      ? extractedFacts.target_entities_arr
+      : [],
+    eligibleProjects: [],
+    eligibleExpenses: Array.isArray(extractedFacts.target_expenses_arr)
+      ? extractedFacts.target_expenses_arr
+      : [],
+    ineligibleExpenses: [],
+    eligibilityConditions: Array.isArray(extractedFacts.eligibility_conditions_arr)
+      ? extractedFacts.eligibility_conditions_arr
+      : [],
+    calculationMethod: extractedFacts.calculation_method_text || '',
+    paymentConditions: Array.isArray(extractedFacts.payment_conditions_arr)
+      ? extractedFacts.payment_conditions_arr
+      : [],
+    applicationMethods: Array.isArray(extractedFacts.application_methods_arr)
+      ? extractedFacts.application_methods_arr
+      : [],
+    projectPeriod: '',
+    preStartRule: {
+      confirmed: Boolean(extractedFacts.pre_start_rule_text),
+      allowedFrom: '',
+      safeDescription: extractedFacts.pre_start_rule_text || '',
+      sourceId: extractedFacts.pre_start_rule_text ? 'source-1' : '',
+    },
+    officialSources: officialUrl
+      ? [
+          {
+            id: 'source-1',
+            label: extractedFacts.title || subsidy.title || '公式情報',
+            url: officialUrl,
+            checkedAt,
+            evidence: evidenceParts.join('\n').slice(0, 12000),
+          },
+        ]
+      : [],
+    unknownFields: [],
+  };
+};
 
 export default function AdminColumns({ initialMode = 'columns' }) {
   const [columns, setColumns] = useState([]);
@@ -770,7 +850,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
     if (
       !window.confirm(
-        '現在の「公開中」の補助金データから、公式情報が比較的揃った記事化候補をAIが1件選び、公開前確認用の下書きと画像を生成します。\n初稿、本文補強、条件を満たした場合の品質レビュー、画像生成を段階的に実行するため、外部API料金が発生します。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約3〜6分かかります）'
+        '公開中の未記事化データから公式ページを取得し、制度情報を構造化します。ファクト充足率80点以上の候補だけ、初稿、本文補強、品質レビュー、画像生成へ進みます。\n候補確認と各生成段階で外部API料金が発生します。80点未満の記事は画像生成・DB保存しません。\n生成後は必ず人間が公式情報・断定表現・独自性を確認してください。\nよろしいですか？（約4〜10分かかります）'
       )
     ) {
       return;
@@ -793,6 +873,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
         .from('subsidies')
         .select('*')
         .eq('crawl_status', 'published')
+        .eq('is_active', true)
         .order('fetched_at', { ascending: false })
         .limit(100);
 
@@ -800,27 +881,105 @@ export default function AdminColumns({ initialMode = 'columns' }) {
 
       const subsidies = rawSubsidies
         .filter((s) => !existingIds.has(s.id))
+        .filter((s) => getCandidateOfficialUrl(s))
         .sort((left, right) => scoreSubsidyForColumn(right) - scoreSubsidyForColumn(left))
-        .slice(0, 30);
+        .slice(0, 10);
 
       if (subsidies.length === 0) {
         throw new Error('新しくコラム化できる補助金がありません（すべて記事化済みです）。');
       }
 
-      addLog(`✅ 未記事化データから公式情報が比較的多い ${subsidies.length} 件をAIに渡しました。分析中です...`, 'info');
+      addLog(`公式URLを持つ未記事化候補 ${subsidies.length} 件から、ファクトが揃う制度を確認します...`, 'info');
 
-      const dataText = subsidies
-        .map(
-          (s) =>
-            `ID:${s.id} | タイトル:${s.title || ''} | 機関:${s.organization || ''} | 地域:${s.region_text || ''} | 対象:${subsidyFactValue(s.target_entities_arr || s.target_entities)} | 経費:${subsidyFactValue(s.target_expenses_arr || s.target_expenses)} | 補助率:${s.subsidy_rate_text || s.subsidy_rate || ''} | 上限:${s.amount_text || s.amount || ''} | 締切:${s.application_period_text || s.deadline || ''} | 公式URL:${s.official_url || s.source_url || 'なし'} | 概要:${s.summary || ''}`
-        )
-        .join('\n---\n');
+      let preparedCandidate = null;
+      const preflightCandidates = subsidies.slice(0, 6);
+      for (const [index, subsidy] of preflightCandidates.entries()) {
+        const sourceUrl = getCandidateOfficialUrl(subsidy);
+        addLog(`公式確認 ${index + 1}/${preflightCandidates.length}: 「${subsidy.title || '名称未設定'}」`, 'info');
 
-      addLog('第1段階: AIが記事化候補を選び、根拠付きの構造化初稿を作成しています...', 'info');
+        try {
+          const { data: sourceData, error: sourceError } = await supabase.functions.invoke('fetch-page-text', {
+            body: {
+              sourceUrl,
+              fallbackUrl: subsidy.source_url || '',
+              title: subsidy.title || '',
+              organization: subsidy.organization || '愛媛県',
+            },
+          });
+          if (sourceError) throw new Error(sourceError.message);
+          if (sourceData?.error) throw new Error(sourceData.error);
+
+          const officialText = String(sourceData?.sourceText || '').trim();
+          const resolvedUrl = String(sourceData?.resolvedUrl || sourceUrl).trim();
+          if (officialText.length < 300) throw new Error('公式本文が300文字未満です。');
+
+          const { data: extractedData, error: extractError } = await supabase.functions.invoke('extract-subsidy', {
+            body: {
+              extractedText: officialText,
+              resolvedUrl,
+              editFormTitle: subsidy.title || '',
+              org: subsidy.organization || '愛媛県',
+              summary: subsidy.summary || '',
+            },
+          });
+          if (extractError) throw new Error(extractError.message);
+          if (extractedData?.error) throw new Error(extractedData.error);
+
+          const sourceFacts = buildExtractedCandidateFacts({
+            subsidy,
+            extractedFacts: extractedData?.facts || {},
+            officialText,
+            resolvedUrl,
+          });
+          const readiness = getColumnFactReadiness(sourceFacts, {
+            title: subsidy.title || '',
+            content: officialText,
+          });
+
+          addLog(
+            `ファクト充足率 ${readiness.score}/100・${readiness.programKindLabel}` +
+              (readiness.missingFacts.length ? ` / 不足: ${readiness.missingFacts.join('、')}` : ''),
+            readiness.ready ? 'success' : 'warning'
+          );
+
+          if (readiness.ready) {
+            preparedCandidate = {
+              subsidy,
+              officialText,
+              resolvedUrl,
+              sourceFacts: readiness.sourceFacts,
+              readiness,
+            };
+            break;
+          }
+
+          addLog('この記事候補は材料不足のためスキップします。', 'warning');
+        } catch (candidateError) {
+          addLog(`候補をスキップしました: ${candidateError.message}`, 'warning');
+        }
+      }
+
+      if (!preparedCandidate) {
+        throw new Error('公式ファクト充足率80点以上の記事候補が見つかりませんでした。記事生成と画像生成は実行していません。');
+      }
+
+      const { subsidy: selectedSubsidy, officialText, sourceFacts, readiness } = preparedCandidate;
+      addLog(
+        `✅ 記事化候補を確定: 「${sourceFacts.officialName || selectedSubsidy.title}」` +
+          `（${readiness.programKindLabel}・ファクト充足率 ${readiness.score}/100）`,
+        'success'
+      );
+      addLog('第1段階: 構造化済み公式ファクトから根拠付き初稿を作成しています...', 'info');
 
       const { data, error } = await supabase.functions.invoke('auto-column', {
         body: {
-          subsidiesText: dataText,
+          title: sourceFacts.officialName || selectedSubsidy.title || '',
+          requestedTitle: sourceFacts.officialName || selectedSubsidy.title || '',
+          sourceText: officialText,
+          sourceFacts,
+          articleType: 'single_program',
+          category: '補助金情報',
+          subsidy_id: String(selectedSubsidy.id || ''),
           deferEnhancements: true,
         },
       });
@@ -853,6 +1012,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
             category: articleData.category || '',
             tags: articleData.tags || [],
             articleType: 'single_program',
+            sourceText: officialText,
             sourceFacts: articleQualityReview.sourceFacts,
             ruleBasedReview: articleQualityReview,
             subsidy_id: articleData.subsidy_id || '',
@@ -909,6 +1069,7 @@ export default function AdminColumns({ initialMode = 'columns' }) {
               content: articleData.content || '',
               category: articleData.category || '',
               articleType: 'single_program',
+              sourceText: officialText,
               sourceFacts: articleQualityReview.sourceFacts,
               ruleBasedReview: articleQualityReview,
             },
@@ -963,6 +1124,21 @@ export default function AdminColumns({ initialMode = 'columns' }) {
       }
       if (articleQualityReview.warnings.length > 0) {
         addLog(`警告: ${articleQualityReview.warnings.join(' / ')}`, 'warning');
+      }
+
+      const isQualifiedDraft =
+        articleQualityReview.qualityScore >= 80 &&
+        articleQualityReview.fatalIssues.length === 0 &&
+        (articleQualityReview.unsupportedClaims || []).length === 0 &&
+        (articleQualityReview.contradictoryClaims || []).length === 0;
+
+      if (!isQualifiedDraft) {
+        addLog(
+          '❌ 品質80点未満または致命的NGが残っているため、画像生成とコラムDBへの保存を中止しました。' +
+            ' 公式ファクトが揃う別候補で再実行してください。',
+          'error'
+        );
+        return;
       }
 
       let finalThumbnailUrl = '';

@@ -66,6 +66,18 @@ const inferTagsFromText = (text: string, allowedCsv: string) => {
   return allowed.filter((tag) => text.includes(tag)).slice(0, 8);
 };
 
+const detectProgramKind = (value: unknown, text: string): ExtractFacts["program_kind"] => {
+  const raw = String(value || "").trim();
+  if (["subsidy", "incentive", "benefit", "loan", "other"].includes(raw)) {
+    return raw as ExtractFacts["program_kind"];
+  }
+  if (/(奨励金|立地奨励|企業立地|雇用奨励|立地促進)/.test(text)) return "incentive";
+  if (/(給付金|支援金|手当|商品券|給付事業)/.test(text)) return "benefit";
+  if (/(融資|貸付|利子補給|信用保証料|保証料補助)/.test(text)) return "loan";
+  if (/(補助金|助成金|補助事業|助成事業)/.test(text)) return "subsidy";
+  return "other";
+};
+
 const callOpenAI = async (prompt: string) => {
   const openAiKey = Deno.env.get("OPENAI_API_KEY");
   const model = Deno.env.get("OPENAI_EXTRACT_MODEL") || "gpt-4o-mini";
@@ -256,12 +268,38 @@ const postProcessFacts = ({
     facts.target_entities_arr,
   );
 
+  facts.program_kind = detectProgramKind(
+    facts.program_kind,
+    `${facts.title || editFormTitle} ${candidateSet.focusedText}`,
+  );
+  facts.eligibility_conditions_arr = toStringArray(facts.eligibility_conditions_arr);
+  facts.payment_conditions_arr = toStringArray(facts.payment_conditions_arr);
+  facts.application_methods_arr = toStringArray(facts.application_methods_arr);
+  facts.calculation_method_text = String(facts.calculation_method_text || "").trim();
+  facts.pre_start_rule_text = String(facts.pre_start_rule_text || "").trim();
+
   if (facts.target_expenses_arr.length > 0) {
     evidence.target_expenses_arr = facts.target_expenses_arr.join(" / ");
   }
 
   if (facts.target_entities_arr.length > 0) {
     evidence.target_entities_arr = facts.target_entities_arr.join(" / ");
+  }
+
+  if (facts.eligibility_conditions_arr.length > 0) {
+    evidence.eligibility_conditions_arr = facts.eligibility_conditions_arr.join(" / ");
+  }
+  if (facts.calculation_method_text) {
+    evidence.calculation_method_text = facts.calculation_method_text;
+  }
+  if (facts.payment_conditions_arr.length > 0) {
+    evidence.payment_conditions_arr = facts.payment_conditions_arr.join(" / ");
+  }
+  if (facts.application_methods_arr.length > 0) {
+    evidence.application_methods_arr = facts.application_methods_arr.join(" / ");
+  }
+  if (facts.pre_start_rule_text) {
+    evidence.pre_start_rule_text = facts.pre_start_rule_text;
   }
 
   if (!facts.title) {

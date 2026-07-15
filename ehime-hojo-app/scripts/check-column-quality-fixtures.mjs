@@ -1,5 +1,6 @@
 import {
   buildColumnSourceFacts,
+  getColumnFactReadiness,
   mergeColumnQualityReview,
   reviewColumnQuality,
 } from '../src/utils/columnQualityValidator.js';
@@ -181,6 +182,73 @@ const fictionalExampleReview = reviewColumnQuality(fictionalExampleArticle, {
   sourceFacts: officialSourceFacts,
   humanReviewed: true,
 });
+const incompleteSubsidyReadiness = getColumnFactReadiness(
+  {
+    ...officialSourceFacts,
+    programKind: 'subsidy',
+    eligibleExpenses: [],
+  },
+  { title: officialSourceFacts.officialName }
+);
+const incentiveSourceFacts = {
+    articleType: 'single_program',
+    programKind: 'incentive',
+    officialName: '今治市賃貸借型企業立地奨励金',
+    administeringBody: '今治市',
+    applicationDeadline: '令和8年4月1日から令和9年3月31日まで',
+    subsidyCap: '開設費用に応じて交付',
+    eligibleApplicants: ['今治市内で対象事業所を開設する事業者'],
+    eligibleExpenses: [],
+    eligibilityConditions: ['賃貸借により対象事業所を開設すること', '指定期間内に操業を開始すること'],
+    calculationMethod: '公式要綱に定める開設費用を基準に算定する',
+    paymentConditions: ['今治市の審査と交付決定を受けること'],
+    officialSources: [
+      {
+        id: 'source-1',
+        label: '今治市公式ページ',
+        url: 'https://www.city.imabari.ehime.jp/example',
+        checkedAt: '2026-07-15',
+        evidence: '賃貸借型企業立地奨励金の対象者、立地要件、算定方法、受付期間を定めた今治市の公式情報です。',
+      },
+    ],
+  };
+const incentiveReadiness = getColumnFactReadiness(
+  incentiveSourceFacts,
+  { title: '今治市賃貸借型企業立地奨励金' }
+);
+const incentiveParagraph =
+  '今治市内で対象事業所を開設する事業者が検討する際は、今治市公式ページの対象者、立地要件、交付要件、算定方法、申請条件を順番に照合します。賃貸借により対象事業所を開設することや指定期間内に操業を開始することなど、公式要綱に記載された条件を満たすか確認し、金額は公式要綱に定める開設費用を基準に算定します。申請期間と必要書類は変更される場合があるため、提出前に今治市の担当窓口で最新情報を確認することが重要です。';
+const incentiveSections = [
+  '制度の結論',
+  '公式ファクト',
+  '対象者',
+  '立地要件',
+  '交付要件',
+  '算定方法',
+  '申請条件',
+  '準備の流れ',
+  '今治市での確認先',
+  '次に取る行動',
+]
+  .map((heading) => `<h2>${heading}</h2><p>${incentiveParagraph}</p><p>${incentiveParagraph}</p>`)
+  .join('');
+const incentiveArticle = {
+  title: '今治市賃貸借型企業立地奨励金の対象者・交付条件と申請前の確認ポイント',
+  quality_review: { humanReviewed: true },
+  content: `
+    <p>確認日 2026-07-15。<a href="https://www.city.imabari.ehime.jp/example">今治市公式ページ</a>をもとに整理しています。</p>
+    <table><caption>制度概要</caption><tbody><tr><th>制度名</th><td>今治市賃貸借型企業立地奨励金</td></tr><tr><th>実施機関</th><td>今治市</td></tr><tr><th>申請期間</th><td>公式ページに記載された期間</td></tr><tr><th>算定方法</th><td>公式要綱に定める開設費用を基準に算定する</td></tr></tbody></table>
+    <table><caption>交付要件</caption><tbody><tr><th>対象者</th><td>今治市内で対象事業所を開設する事業者</td></tr><tr><th>立地要件</th><td>賃貸借により対象事業所を開設すること</td></tr><tr><th>交付条件</th><td>指定期間内に操業を開始すること</td></tr></tbody></table>
+    ${incentiveSections}
+    <h2>確認リスト</h2><ul><li>対象者と立地要件を確認する</li><li>算定方法と申請条件を確認する</li><li>今治市の担当窓口へ相談する</li></ul>
+    <p><a href="/ehime-subsidy/">愛媛県の補助金一覧を確認する</a>か、公式ページで最新情報を確認してください。</p>
+  `,
+};
+const incentiveReview = reviewColumnQuality(incentiveArticle, {
+  articleType: 'single_program',
+  sourceFacts: incentiveSourceFacts,
+  humanReviewed: true,
+});
 
 assertCondition(badReview.finalScore <= 39, '低品質fixtureは39点以下であるべきです。', badReview);
 assertCondition(badReview.grade === 'D', '低品質fixtureはD判定であるべきです。', badReview);
@@ -225,6 +293,21 @@ assertCondition(
   'suppliedFacts にない株式会社Aなどの架空・仮名事例を検出すべきです。',
   fictionalExampleReview
 );
+assertCondition(
+  incompleteSubsidyReadiness.ready === false && incompleteSubsidyReadiness.missingFacts.includes('eligibleExpenses'),
+  '補助金は対象経費がない状態で記事生成可能にしてはいけません。',
+  incompleteSubsidyReadiness
+);
+assertCondition(
+  incentiveReadiness.ready === true && !incentiveReadiness.missingFacts.includes('eligibleExpenses'),
+  '奨励金は対象経費ではなく交付要件・算定方法が揃えば記事生成可能にすべきです。',
+  incentiveReadiness
+);
+assertCondition(
+  incentiveReview.finalScore >= 90 && incentiveReview.fatalIssues.length === 0,
+  '奨励金記事は対象経費がなくても交付要件・算定方法が揃えば90点以上にできるべきです。',
+  incentiveReview
+);
 
 console.log(JSON.stringify({
   bad: {
@@ -264,5 +347,13 @@ console.log(JSON.stringify({
   fictionalExample: {
     finalScore: fictionalExampleReview.finalScore,
     unsupportedClaims: fictionalExampleReview.unsupportedClaims,
+  },
+  factReadiness: {
+    incompleteSubsidy: incompleteSubsidyReadiness,
+    incentive: incentiveReadiness,
+    incentiveArticle: {
+      finalScore: incentiveReview.finalScore,
+      fatalIssues: incentiveReview.fatalIssues,
+    },
   },
 }, null, 2));

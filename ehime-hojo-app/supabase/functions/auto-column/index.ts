@@ -52,6 +52,8 @@ type ArticleType =
   | "research"
   | "marketing";
 
+type ProgramKind = "subsidy" | "incentive" | "benefit" | "loan" | "other";
+
 type OfficialSource = {
   id: string;
   label: string;
@@ -62,6 +64,7 @@ type OfficialSource = {
 
 type SourceFacts = {
   articleType: ArticleType;
+  programKind: ProgramKind;
   officialName: string;
   fiscalYear: string;
   applicationRound: string;
@@ -75,6 +78,9 @@ type SourceFacts = {
   eligibleProjects: string[];
   eligibleExpenses: string[];
   ineligibleExpenses: string[];
+  eligibilityConditions: string[];
+  calculationMethod: string;
+  paymentConditions: string[];
   applicationMethods: string[];
   projectPeriod: string;
   preStartRule: {
@@ -369,8 +375,16 @@ const articleTypeLabels: Record<ArticleType, string> = {
   marketing: "販路開拓",
 };
 
+const programKindLabels: Record<ProgramKind, string> = {
+  subsidy: "補助金・助成金",
+  incentive: "奨励金",
+  benefit: "給付金・支援金",
+  loan: "融資・利子補給",
+  other: "その他の支援制度",
+};
+
 const sourceFactRequiredByType: Record<ArticleType, string[]> = {
-  single_program: ["officialName", "administeringBody", "officialSources", "eligibleApplicants", "eligibleExpenses"],
+  single_program: ["officialName", "administeringBody", "officialSources", "eligibleApplicants"],
   feature: ["officialSources"],
   feasibility_study: ["officialSources", "eligibleProjects"],
   equipment: ["officialSources", "eligibleExpenses"],
@@ -407,6 +421,7 @@ const extractUrlsFromText = (text = "") =>
 
 const createEmptySourceFacts = (articleType: ArticleType = "feature"): SourceFacts => ({
   articleType,
+  programKind: "other",
   officialName: "",
   fiscalYear: "",
   applicationRound: "",
@@ -420,6 +435,9 @@ const createEmptySourceFacts = (articleType: ArticleType = "feature"): SourceFac
   eligibleProjects: [],
   eligibleExpenses: [],
   ineligibleExpenses: [],
+  eligibilityConditions: [],
+  calculationMethod: "",
+  paymentConditions: [],
   applicationMethods: [],
   projectPeriod: "",
   preStartRule: {
@@ -449,6 +467,23 @@ const normalizeArticleType = (value: unknown, context: { title?: string; content
   return "feature";
 };
 
+const detectProgramKind = (
+  value: unknown,
+  context: { title?: string; content?: string } = {}
+): ProgramKind => {
+  const raw = textValue(value);
+  if (["subsidy", "incentive", "benefit", "loan", "other"].includes(raw)) {
+    return raw as ProgramKind;
+  }
+
+  const text = `${context.title || ""} ${context.content || ""}`;
+  if (/(奨励金|立地奨励|企業立地|雇用奨励|立地促進)/.test(text)) return "incentive";
+  if (/(給付金|支援金|手当|商品券|給付事業)/.test(text)) return "benefit";
+  if (/(融資|貸付|利子補給|信用保証料|保証料補助)/.test(text)) return "loan";
+  if (/(補助金|助成金|補助事業|助成事業)/.test(text)) return "subsidy";
+  return "other";
+};
+
 const normalizeOfficialSource = (source: unknown, index: number): OfficialSource => {
   const value = source && typeof source === "object" ? source as Record<string, unknown> : {};
   return {
@@ -463,9 +498,13 @@ const normalizeOfficialSource = (source: unknown, index: number): OfficialSource
 const normalizeSourceFacts = (value: unknown): SourceFacts => {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const articleType = normalizeArticleType(raw.articleType || raw.article_type || "feature");
+  const programKind = detectProgramKind(raw.programKind || raw.program_kind, {
+    title: textValue(raw.officialName || raw.official_name),
+  });
   return {
     ...createEmptySourceFacts(articleType),
     articleType,
+    programKind,
     officialName: textValue(raw.officialName || raw.official_name),
     fiscalYear: textValue(raw.fiscalYear || raw.fiscal_year),
     applicationRound: textValue(raw.applicationRound || raw.application_round),
@@ -479,6 +518,9 @@ const normalizeSourceFacts = (value: unknown): SourceFacts => {
     eligibleProjects: uniqueTextList(raw.eligibleProjects || raw.eligible_projects),
     eligibleExpenses: uniqueTextList(raw.eligibleExpenses || raw.eligible_expenses),
     ineligibleExpenses: uniqueTextList(raw.ineligibleExpenses || raw.ineligible_expenses),
+    eligibilityConditions: uniqueTextList(raw.eligibilityConditions || raw.eligibility_conditions),
+    calculationMethod: textValue(raw.calculationMethod || raw.calculation_method),
+    paymentConditions: uniqueTextList(raw.paymentConditions || raw.payment_conditions),
     applicationMethods: uniqueTextList(raw.applicationMethods || raw.application_methods),
     projectPeriod: textValue(raw.projectPeriod || raw.project_period),
     preStartRule: {
@@ -499,14 +541,37 @@ const normalizeSourceFacts = (value: unknown): SourceFacts => {
 const hasUsableOfficialSource = (facts: SourceFacts) =>
   facts.officialSources.some((source) => source.url && source.evidence && source.evidence.length >= 12);
 
+const hasFundingDetails = (facts: SourceFacts) =>
+  Boolean(facts.subsidyRate || facts.subsidyCap || facts.calculationMethod);
+
+const hasEligibilityDetails = (facts: SourceFacts) =>
+  facts.eligibleApplicants.length > 0 || facts.eligibilityConditions.length > 0;
+
+const hasPaymentDetails = (facts: SourceFacts) =>
+  facts.paymentConditions.length > 0 || hasFundingDetails(facts);
+
 const getMissingSourceFactFields = (facts: SourceFacts, title = "") => {
   const required = [...(sourceFactRequiredByType[facts.articleType] || sourceFactRequiredByType.feature)];
-  if (facts.articleType === "single_program" || amountPromiseRe.test(title)) {
-    required.push("officialName", "administeringBody", "officialSources", "subsidyRate", "subsidyCap");
+  if (facts.articleType === "single_program") {
+    if (facts.programKind === "subsidy") required.push("eligibleExpenses", "fundingDetails");
+    if (facts.programKind === "incentive") required.push("eligibilityConditions", "calculationMethod");
+    if (facts.programKind === "benefit") required.push("eligibilityConditions", "paymentConditions");
+    if (facts.programKind === "loan") required.push("eligibilityConditions", "fundingDetails");
+    if (facts.programKind === "other") required.push("programDetails", "fundingDetails");
+  }
+  if (amountPromiseRe.test(title)) {
+    required.push("officialName", "administeringBody", "officialSources", "fundingDetails");
   }
   if (facts.articleType === "single_program" || yearPromiseRe.test(title) || deadlinePromiseRe.test(title)) required.push("applicationDeadline");
   return Array.from(new Set(required.filter((field) => {
     if (field === "officialSources") return !hasUsableOfficialSource(facts);
+    if (field === "fundingDetails") return !hasFundingDetails(facts);
+    if (field === "eligibilityConditions") return !hasEligibilityDetails(facts);
+    if (field === "paymentConditions") return !hasPaymentDetails(facts);
+    if (field === "calculationMethod") return !textValue(facts.calculationMethod || facts.subsidyCap);
+    if (field === "programDetails") {
+      return !(facts.eligibleProjects.length || facts.eligibilityConditions.length || facts.eligibleExpenses.length);
+    }
     const value = (facts as unknown as Record<string, unknown>)[field];
     return Array.isArray(value) ? value.length === 0 : !textValue(value);
   })));
@@ -571,6 +636,10 @@ const buildSourceFacts = ({
     content: `${content || ""} ${officialText}`,
     category,
   });
+  nextFacts.programKind = detectProgramKind(
+    existing.programKind === "other" ? "" : existing.programKind,
+    { title, content: `${content || ""} ${officialText}` }
+  );
   if (!nextFacts.preStartRule.confirmed && !nextFacts.preStartRule.safeDescription && startTimingRe.test(officialText)) {
     nextFacts.preStartRule.safeDescription = "契約・発注・購入・着手が可能になる時点は、入力素材内の記載をもとに確認が必要です。";
   }
@@ -593,6 +662,9 @@ const sourceFactEvidenceText = (facts: SourceFacts) =>
     ...facts.eligibleProjects,
     ...facts.eligibleExpenses,
     ...facts.ineligibleExpenses,
+    ...facts.eligibilityConditions,
+    facts.calculationMethod,
+    ...facts.paymentConditions,
     ...facts.applicationMethods,
     facts.projectPeriod,
     facts.preStartRule.safeDescription,
@@ -664,7 +736,14 @@ const buildFactualClaims = (title: string, text: string, sourceFacts: SourceFact
     );
   }
 
-  if (amountPromiseRe.test(title) && (!sourceFacts.subsidyRate || !sourceFacts.subsidyCap)) {
+  const titlePromisesRate = /補助率/.test(title);
+  const titlePromisesNumericCap = /(上限額|補助上限|補助額|給付額|助成額|上限)/.test(title);
+  const titlePromisesGenericAmount = /金額/.test(title);
+  const missingPromisedFunding =
+    (titlePromisesRate && !sourceFacts.subsidyRate) ||
+    (titlePromisesNumericCap && !sourceFacts.subsidyCap) ||
+    (titlePromisesGenericAmount && !sourceFacts.subsidyCap && !sourceFacts.calculationMethod);
+  if (amountPromiseRe.test(title) && missingPromisedFunding) {
     addClaim("タイトルで補助率・上限額を約束しているが、公式ファクトに具体値がありません。", "unsupported", "タイトル安全化が必要です。");
   }
   if (industryUnsupportedRe.test(text) && !industryUnsupportedRe.test(factsText)) {
@@ -707,7 +786,10 @@ const suggestSafeTitles = (title: string, facts: SourceFacts) => {
     .trim();
   const base = theme || facts.officialName || "愛媛県の補助金";
   if (facts.articleType === "single_program" && facts.officialName) {
-    return [`${facts.officialName}の確認ポイント`, `${facts.officialName}の対象者・対象経費と申請前の注意点`];
+    const detailTitle = facts.programKind === "subsidy"
+      ? `${facts.officialName}の対象者・対象経費と申請前の注意点`
+      : `${facts.officialName}の対象者・交付条件と申請前の注意点`;
+    return [`${facts.officialName}の確認ポイント`, detailTitle];
   }
   if (/産業廃棄物処理業者|廃棄物処理業者|リサイクル業者/.test(title)) {
     return Array.from(new Set([
@@ -751,6 +833,12 @@ const buildMachineQualityReview = (
     }
   );
   sourceFacts.articleType = normalizedArticleType;
+  const programKind = detectProgramKind(sourceFacts.programKind, { title, content: text });
+  sourceFacts.programKind = programKind;
+  const requiresExpenseDetails = programKind === "subsidy";
+  const hasProgramSpecificDetails = requiresExpenseDetails
+    ? targetRe.test(text) && expenseRe.test(text) && excludedExpenseRe.test(text) && projectRe.test(text)
+    : targetRe.test(text) && /(対象要件|交付要件|支給要件|立地要件|算定方法|交付条件|支給条件|申請条件)/.test(text);
   const fatalIssues: string[] = [];
   const warnings: string[] = [];
   const strengths: string[] = [];
@@ -795,7 +883,12 @@ const buildMachineQualityReview = (
   };
 
   if (compactTextLength < 1500) {
-    addFatal("本文が1,500文字未満です。", "対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。");
+    addFatal(
+      "本文が1,500文字未満です。",
+      requiresExpenseDetails
+        ? "対象者、対象経費、対象外、申請前注意、愛媛県内での探し方を追加してください。"
+        : `対象者、${programKindLabels[programKind]}の交付・支給要件、算定方法、申請時期、愛媛県内での確認先を追加してください。`
+    );
     addScoreCap(49, "本文が1,500文字未満です。");
   } else if (compactTextLength < 4000) {
     addWarning("本文が4,000文字未満です。", "概要だけで終わらないよう、公式ファクト表、確認項目、申請準備、よくある失敗、愛媛県内での探し方を追加してください。");
@@ -820,12 +913,19 @@ const buildMachineQualityReview = (
   }
 
   if (amountPromiseRe.test(title)) {
+    const titlePromisesRate = /補助率/.test(title);
+    const titlePromisesNumericCap = /(上限額|補助上限|補助額|給付額|助成額|上限)/.test(title);
+    const titlePromisesGenericAmount = /金額/.test(title);
+    const fundingAnswerInBody =
+      ((titlePromisesRate || titlePromisesNumericCap) && moneyOrRateRe.test(text)) ||
+      (titlePromisesGenericAmount && (moneyOrRateRe.test(text) || /算定方法|算定基準|計算方法/.test(text)));
     const hasAmountEvidence =
-      sourceFacts.subsidyRate &&
-      sourceFacts.subsidyCap &&
+      (!titlePromisesRate || sourceFacts.subsidyRate) &&
+      (!titlePromisesNumericCap || sourceFacts.subsidyCap) &&
+      (!titlePromisesGenericAmount || sourceFacts.subsidyCap || sourceFacts.calculationMethod) &&
       hasOfficialEvidence &&
       amountPromiseRe.test(text) &&
-      moneyOrRateRe.test(text) &&
+      fundingAnswerInBody &&
       officialRe.test(text);
     if (!hasAmountEvidence) {
       addFatal(
@@ -913,11 +1013,15 @@ const buildMachineQualityReview = (
     strengths.push("内部リンクがあります。");
   }
 
-  if (!targetRe.test(text) || !expenseRe.test(text) || !excludedExpenseRe.test(text)) {
-    addFatal("対象者・対象経費・対象外になりやすい経費のいずれかが不足しています。");
+  if (!hasProgramSpecificDetails) {
+    addFatal(
+      requiresExpenseDetails
+        ? "対象者・対象経費・対象外になりやすい経費のいずれかが不足しています。"
+        : `${programKindLabels[programKind]}として、対象者・交付要件・算定方法または支給条件の説明が不足しています。`
+    );
   }
 
-  if (!preContractRe.test(text) && !startTimingRe.test(text)) {
+  if (requiresExpenseDetails && !preContractRe.test(text) && !startTimingRe.test(text)) {
     addFatal("契約・発注・購入・着手が可能になる時点について、制度ごとの確認を促す注意がありません。");
     addScoreCap(69, "契約・発注・購入・着手が可能になる時点の注意がありません。");
   }
@@ -1001,11 +1105,8 @@ const buildMachineQualityReview = (
     compactTextLength >= 4000 &&
     sourceCoverageScore === 100 &&
     factualGroundingScore === 100 &&
-    targetRe.test(text) &&
-    expenseRe.test(text) &&
-    excludedExpenseRe.test(text) &&
-    projectRe.test(text) &&
-    (preContractRe.test(text) || startTimingRe.test(text)) &&
+    hasProgramSpecificDetails &&
+    (!requiresExpenseDetails || preContractRe.test(text) || startTimingRe.test(text)) &&
     hasOfficialRoute &&
     hasOfficialEvidence &&
     ehimeContextRe.test(text) &&
@@ -1270,6 +1371,9 @@ const runLlmQualityReview = async ({
 }): Promise<LlmReviewPayload> => {
   const reviewModel = Deno.env.get("OPENAI_QUALITY_REVIEW_MODEL")?.trim() || "gpt-4o-mini";
   const articleText = stripHtml(articleData.content || "").slice(0, 12000);
+  const semanticProgramInstruction = sourceFacts.programKind === "subsidy"
+    ? "対象者・対象事業・対象経費・対象外経費が具体的で、公式ファクトと一致しているか"
+    : `${programKindLabels[sourceFacts.programKind]}として、対象者・交付または支給要件・算定方法・申請時期が具体的で、公式ファクトと一致しているか。対象経費の制度でない場合に経費項目を創作していないか`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -1346,7 +1450,7 @@ const runLlmQualityReview = async ({
 - FS調査事業なのに設備導入費の記事になっていないか
 - 公式情報の扱いが安全か
 - 補助率・上限額・年度・締切などを根拠なく断定していないか
-- 対象者・対象経費・対象外経費が具体的か
+- ${semanticProgramInstruction}
 - 愛媛県内の事業者向けの地域性があるか
 - SEO記事として読み応えがあるか
 - 管理用メモが混入していないか
@@ -1814,6 +1918,8 @@ serve(async (req: Request) => {
       typeof body?.originalBody === "string" ? body.originalBody.trim() : "";
     const originalTitle =
       typeof body?.originalTitle === "string" ? body.originalTitle.trim() : "";
+    const requestedSubsidyId =
+      typeof body?.subsidy_id === "string" ? body.subsidy_id.trim() : "";
     const suppliedFacts = buildSourceFacts({
       sourceFacts: body?.sourceFacts,
       sourceText,
@@ -1822,7 +1928,7 @@ serve(async (req: Request) => {
       content: originalBody || contentText,
       category: preferredCategory,
       articleType,
-      subsidyId: typeof body?.subsidy_id === "string" ? body.subsidy_id : "",
+      subsidyId: requestedSubsidyId,
     });
 
     if (qualityReviewOnly) {
@@ -1948,6 +2054,9 @@ serve(async (req: Request) => {
       const currentReview = body?.ruleBasedReview && typeof body.ruleBasedReview === "object"
         ? body.ruleBasedReview as Record<string, unknown>
         : {};
+      const repairProgramInstruction = suppliedFacts.programKind === "subsidy"
+        ? "対象者、対象事業、対象経費、対象外経費、契約・発注・購入・着手時期を suppliedFacts の範囲で具体化する。"
+        : `${programKindLabels[suppliedFacts.programKind]}の記事として、対象者、交付・支給要件、算定方法、申請時期を具体化する。対象経費が suppliedFacts にない場合は対象経費の節を作らない。`;
       const repairRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -1991,6 +2100,7 @@ serve(async (req: Request) => {
 - 文字数、表、見出し、チェックリストなど不足している要素を追加し、根拠不明の箇所だけを削除または安全化する。
 - 通常コラムは4,000文字以上、特集記事は6,000文字以上を目安にし、同じ説明の繰り返しで水増ししない。
 - H2は10〜12個に絞り、各H2に原則2段落以上の具体的な説明を入れる。
+- 公式ファクト表と申請前確認表など、内容の異なる表を2つ以上入れる。
 - suppliedFacts にない制度名、年度、補助率、上限額、締切、対象者、対象経費、対象外経費、公式URLを追加しない。
 - suppliedFacts にない企業名、架空事例、モデルケース、導入効果、試算金額を追加しない。「株式会社A」などの仮名事例も禁止する。
 - 根拠がない具体情報は削除、または「確認が必要」という安全表現に弱める。
@@ -2000,6 +2110,7 @@ serve(async (req: Request) => {
 - 表、チェックリスト、内部リンク、CTA、公式確認導線を残す。
 - 内部リンクは実在するものだけにする。/subsidy-list は使わず、補助金一覧は /ehime-subsidy/ にする。
 - 契約・発注・購入・着手が可能になる時点は、制度ごとに公募要領と実施機関へ確認する安全表現にする。
+- ${repairProgramInstruction}
 `.trim(),
             },
             {
@@ -2061,7 +2172,7 @@ ${JSON.stringify({
       }
 
       const articleData = {
-        subsidy_id: typeof body?.subsidy_id === "string" ? body.subsidy_id : "",
+        subsidy_id: requestedSubsidyId,
         slug: createSlug(repairedArticle.slug || repairedArticle.title || originalTitle),
         title: repairedArticle.title || originalTitle,
         seo_title: repairedArticle.seo_title || repairedArticle.title || originalTitle,
@@ -2155,7 +2266,7 @@ ${JSON.stringify({
     }
 
     const articleLengthInstruction = deferEnhancements
-      ? "- このリクエストは第一段階の構造化初稿です。本文は1,800〜2,400文字、H2は6〜8個、表は最低1つにまとめてください。後続の別リクエストで4,000文字以上へ補強します。"
+      ? "- このリクエストは第一段階の構造化初稿です。本文は2,500〜3,200文字、H2は6〜8個、表は最低1つにまとめてください。後続の別リクエストで4,000文字以上へ補強します。"
       : "- 通常コラムは最低4,000文字以上、特集記事は6,000文字以上を目安にしてください。";
     const articleStructureInstruction = deferEnhancements
       ? "- 第一段階では必須内容を6〜8個のH2へ整理し、各H2に具体的な説明を入れてください。薄い見出しを量産しないでください。"
@@ -2163,6 +2274,16 @@ ${JSON.stringify({
     const tableInstruction = deferEnhancements
       ? "- 第一段階の表は最低1つ入れてください。"
       : "- 表を最低2つ以上入れてください。";
+    const programKind = suppliedFacts.programKind;
+    const programFactInstruction = programKind === "subsidy"
+      ? "- 補助金・助成金として、対象者、対象事業、対象経費、対象外経費、補助率・上限額、契約・発注・購入・着手時期を suppliedFacts の範囲で具体化してください。"
+      : `- ${programKindLabels[programKind]}として、対象者、交付・支給要件、算定方法、申請時期を suppliedFacts の範囲で具体化してください。対象経費が suppliedFacts にない場合は対象経費や対象外経費を作らないでください。`;
+    const programTimingInstruction = programKind === "subsidy"
+      ? "- 申請前に契約・発注・購入・着手しない注意を必ず書いてください。"
+      : "- 申請、契約、立地、操業開始、支給判定などの時期は suppliedFacts にある内容だけを書き、不明な場合は公式要綱で確認するよう案内してください。";
+    const programRequiredContent = programKind === "subsidy"
+      ? "- 対象になる可能性がある人\n- 対象になりやすい経費\n- 対象外・注意が必要な経費"
+      : `- 対象になる可能性がある人\n- ${programKindLabels[programKind]}の交付・支給要件\n- 金額の算定方法と申請時期`;
 
     const systemPrompt = `
 あなたは、愛媛県内の中小企業・個人事業主向けに補助金・助成金情報をわかりやすく整理するWebメディアの編集者です。
@@ -2177,9 +2298,9 @@ ${tableInstruction}
 - チェックリスト、CTA、内部リンクを本文に自然に入れてください。
 - 使用してよい主な内部リンクは /ehime-subsidy/、/search?keyword=設備投資、/simulator、/experts、/columns、/features、/feature/startup-digital です。
 - 存在しない内部URLを作らないでください。/subsidy-list は存在しないため禁止です。補助金一覧へ誘導する場合は /ehime-subsidy/ または /search を使ってください。
-- 対象者、対象経費、対象外になりやすい経費、申請前注意を具体的に書いてください。
+${programFactInstruction}
 - 公式ファクトで確認できていること、まだ確認が必要なこと、申請準備の流れ、よくある失敗と回避策を独立した見出しで厚めに書いてください。
-- 申請前に契約・発注・購入・着手しない注意を必ず書いてください。
+${programTimingInstruction}
 - 愛媛県、市町村、商工会議所、商工会、支援機関など愛媛県内の読者向けの視点を入れてください。
 - 文字数稼ぎの一般論、長い前置き、同じ内容の繰り返し、キーワードだけを差し替えた文章は禁止です。
 - 入力データにない日付、受付状況、金額、補助率、採択率、企業名、成功事例、URLを作らないでください。
@@ -2210,9 +2331,7 @@ ${tableInstruction}
 - この記事でわかること
 - 公式ファクトで確認できていること
 - まだ確認が必要なこと
-- 対象になる可能性がある人
-- 対象になりやすい経費
-- 対象外・注意が必要な経費
+${programRequiredContent}
 - 申請前に確認すること
 - 申請準備の流れ
 - よくある失敗と回避策
@@ -2227,7 +2346,7 @@ ${tableInstruction}
 
 【100点満点の品質基準】
 1. 検索意図との一致: 15点。読者が知りたい答えに早く到達し、タイトルと本文がズレていないこと。
-2. 具体性: 15点。対象者、対象経費、対象外、申請前注意が具体的で、「詳しくは公式へ」だけで逃げないこと。
+2. 具体性: 15点。制度種別に応じた対象者、対象経費または交付・支給要件、算定方法、申請前注意が具体的で、「詳しくは公式へ」だけで逃げないこと。
 3. 公式確認・安全性: 15点。公式確認導線、変更可能性、断定回避、未確認数字の抑制があること。
 4. 記事ボリューム: 10点。通常4,000文字以上、特集6,000文字以上を目安にすること。
 5. 愛媛県向けの地域性: 10点。県内事業者、市町村、商工会議所、商工会、支援機関の視点があること。
@@ -2244,11 +2363,11 @@ ${tableInstruction}
 - 表が1つもない
 - 内部リンクが1つもない
 - /subsidy-list など存在しない内部リンクがある
-- 対象者・対象経費・注意点が抽象的すぎる
+- 制度種別に応じた対象者、対象経費または交付・支給要件、算定方法、注意点が抽象的すぎる
 - 愛媛県・市町村・地域事業者の視点がない
 - 管理用メモが公開本文に出ている
 - 公式情報で確認していない数字を確定情報のように書いている
-- 契約・発注・購入・着手が可能になる時点について、制度ごとの確認を促していない
+- 補助金・助成金で、契約・発注・購入・着手が可能になる時点について制度ごとの確認を促していない
 - 本文中の金額・日付・対象者・対象経費・対象外経費に、公式ファクトで裏付けられない具体的主張がある
 
 【品質レビュー】
@@ -2375,7 +2494,7 @@ ${extraInstructionBlock}
       body: JSON.stringify({
         model: textModel,
         temperature: 0.7,
-        max_completion_tokens: deferEnhancements ? 6000 : 12000,
+        max_completion_tokens: deferEnhancements ? 7000 : 12000,
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -2603,7 +2722,7 @@ ${extraInstructionBlock}
       );
     }
 
-    articleData.subsidy_id = articleData.subsidy_id || "";
+    articleData.subsidy_id = requestedSubsidyId || articleData.subsidy_id || "";
     articleData.title = articleData.title || requestedTitle || title || "補助金に関するお役立ちコラム";
     articleData.slug = createSlug(articleData.slug || articleData.title);
     articleData.seo_title = articleData.seo_title || articleData.title;

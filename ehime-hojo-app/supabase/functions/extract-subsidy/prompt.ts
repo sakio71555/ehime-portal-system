@@ -52,6 +52,14 @@ export const buildPrompt = ({
 - 「対象児童」「給付対象者」「支給対象者」付近の文は target_entities_arr に入れる。
 - 問い合わせ先、提出先、申請期間、補助率、金額上限は対象経費に混ぜない。
 
+【制度種別・交付条件のルール】
+- program_kind は、補助金・助成金なら subsidy、奨励金なら incentive、給付金・支援金・手当なら benefit、融資・貸付・利子補給なら loan、それ以外は other とする。
+- 奨励金では対象経費を無理に作らず、立地要件・雇用要件・操業開始要件などを eligibility_conditions_arr に入れる。
+- 給付金・支援金では対象経費を無理に作らず、支給条件を payment_conditions_arr に入れる。
+- calculation_method_text には、補助率、床面積、雇用人数、賃借料など金額算定の基準を原文に忠実に入れる。
+- application_methods_arr には提出方法・申請先・必要な事前相談など、本文で確認できる内容だけを入れる。
+- pre_start_rule_text には契約、発注、購入、着手、操業開始などの時期に関する公式記載だけを入れる。見つからなければ空文字にする。
+
 【返却JSON形式】
 {
   "facts": {
@@ -69,6 +77,12 @@ export const buildPrompt = ({
     "amount_text": "",
     "amount_max_yen": 0,
     "subsidy_rate_text": "",
+    "program_kind": "subsidy または incentive または benefit または loan または other",
+    "eligibility_conditions_arr": [],
+    "calculation_method_text": "",
+    "payment_conditions_arr": [],
+    "application_methods_arr": [],
+    "pre_start_rule_text": "",
     "target_expenses_arr": [],
     "target_entities_arr": [],
     "fiscal_year": "",
@@ -80,6 +94,11 @@ export const buildPrompt = ({
       "subsidy_rate_text": "",
       "target_entities_arr": "",
       "target_expenses_arr": "",
+      "eligibility_conditions_arr": "",
+      "calculation_method_text": "",
+      "payment_conditions_arr": "",
+      "application_methods_arr": "",
+      "pre_start_rule_text": "",
       "official_url": ""
     }
   },
